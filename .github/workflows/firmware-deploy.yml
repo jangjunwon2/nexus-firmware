@@ -133,3 +133,39 @@ jobs:
               \"notes\": \"v${VERSION}: ${MSG}\"
             }"
           echo "✅ ${{ matrix.device }} v${VERSION} 완료"
+
+      - name: Delete old releases
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          VERSION: ${{ needs.discover.outputs.version }}
+        run: |
+          # 현재 버전 외 이전 릴리스 조회
+          OLD=$(curl -s \
+            "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${{ matrix.device }}&version=neq.${VERSION}&select=id,storage_path" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}")
+
+          COUNT=$(echo "$OLD" | jq 'length')
+          if [ "$COUNT" -eq "0" ]; then
+            echo "삭제할 이전 버전 없음"
+            exit 0
+          fi
+
+          # Storage 파일 삭제
+          PREFIXES=$(echo "$OLD" | jq '[.[].storage_path]')
+          curl -s -X DELETE \
+            "${SUPABASE_URL}/storage/v1/object/firmware" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"prefixes\": ${PREFIXES}}"
+
+          # DB 레코드 삭제
+          IDS=$(echo "$OLD" | jq -r '[.[].id] | join(",")' )
+          curl -s -X DELETE \
+            "${SUPABASE_URL}/rest/v1/firmware_releases?id=in.(${IDS})" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}"
+
+          echo "🗑️ 이전 버전 ${COUNT}개 삭제 완료"
