@@ -8,28 +8,43 @@ on:
       - "**/*.h"
       - "**/*.cpp"
       - "**/*.c"
+      - "version.txt"
 
 jobs:
-  build-and-deploy:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "빌드 버전: $VERSION"
+
+      - id: find
+        run: |
+          DEVICES=$(find . -name "*.ino" -not -path "*/.git/*" \
+            | xargs -I{} dirname {} \
+            | sed 's|^\./||' \
+            | sort -u \
+            | jq -R . | jq -sc .)
+          echo "matrix=$DEVICES" >> $GITHUB_OUTPUT
+          echo "발견된 장치: $DEVICES"
+
+  build:
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - sketch: nexus_flux_case/nexus_flux_case.ino
-            device: nexus_flux_case
-          - sketch: nexus_pot/nexus_pot.ino
-            device: nexus_pot
-          - sketch: nexus_receiver/nexus_receiver.ino
-            device: nexus_receiver
-          - sketch: nexus_smoke/nexus_smoke.ino
-            device: nexus_smoke
-          - sketch: nexus_transmitter/nexus_transmitter.ino
-            device: nexus_transmitter
+        device: ${{ fromJson(needs.discover.outputs.matrix) }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
@@ -44,12 +59,9 @@ jobs:
 
       - name: Install libraries
         run: |
-          # Arduino Library Manager 등록 라이브러리
           arduino-cli lib install "ArduinoJson"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
-
-          # ESPAsyncWebServer (Library Manager 미등록 → GitHub에서 직접 설치)
           git clone --depth 1 https://github.com/me-no-dev/AsyncTCP \
             ~/Arduino/libraries/AsyncTCP
           git clone --depth 1 https://github.com/me-no-dev/ESPAsyncWebServer \
@@ -58,58 +70,55 @@ jobs:
       - name: Compile
         run: |
           mkdir -p build
+          SKETCH=$(find ./${{ matrix.device }} -name "*.ino" | head -1)
+          echo "빌드: $SKETCH (v${{ needs.discover.outputs.version }})"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
-            ${{ matrix.sketch }} \
+            "$SKETCH" \
             --output-dir ./build
 
       - name: Get signed upload URL
         id: get-url
         env:
           FIRMWARE_CI_TOKEN: ${{ secrets.FIRMWARE_CI_TOKEN }}
+          VERSION: ${{ needs.discover.outputs.version }}
         run: |
-          SHORT="${GITHUB_SHA:0:8}"
-          FILENAME="firmware-${SHORT}.bin"
-
+          FILENAME="firmware-v${VERSION}.bin"
           RESPONSE=$(curl -sf -X POST \
             https://mystic-lab.vercel.app/api/admin/firmware/upload-url \
             -H "Authorization: Bearer ${FIRMWARE_CI_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"device_type\":\"${{ matrix.device }}\",\"version\":\"${SHORT}\",\"filename\":\"${FILENAME}\"}")
-
+            -d "{\"device_type\":\"${{ matrix.device }}\",\"version\":\"${VERSION}\",\"filename\":\"${FILENAME}\"}")
           echo "signed_url=$(echo "$RESPONSE" | jq -r '.signedUrl')" >> "$GITHUB_OUTPUT"
           echo "storage_path=$(echo "$RESPONSE" | jq -r '.storagePath')" >> "$GITHUB_OUTPUT"
           echo "public_url=$(echo "$RESPONSE" | jq -r '.publicUrl')" >> "$GITHUB_OUTPUT"
-          echo "version=${SHORT}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload binary to Supabase Storage
+      - name: Upload binary
         run: |
           BIN=$(find ./build -name "*.bin" | head -1)
-          echo "업로드 파일: $BIN ($(stat -c%s "$BIN") bytes)"
+          echo "업로드: $BIN ($(stat -c%s "$BIN") bytes)"
           curl -sf -X PUT "${{ steps.get-url.outputs.signed_url }}" \
             -H "Content-Type: application/octet-stream" \
             --data-binary @"${BIN}"
 
-      - name: Register release in admin
+      - name: Register release
         env:
           FIRMWARE_CI_TOKEN: ${{ secrets.FIRMWARE_CI_TOKEN }}
+          VERSION: ${{ needs.discover.outputs.version }}
         run: |
           BIN=$(find ./build -name "*.bin" | head -1)
           FILE_SIZE=$(stat -c%s "$BIN")
-          SHORT="${GITHUB_SHA:0:8}"
           MSG="${{ github.event.head_commit.message }}"
-
           curl -sf -X POST \
             https://mystic-lab.vercel.app/api/admin/firmware \
             -H "Authorization: Bearer ${FIRMWARE_CI_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{
               \"device_type\": \"${{ matrix.device }}\",
-              \"version\": \"${{ steps.get-url.outputs.version }}\",
+              \"version\": \"${VERSION}\",
               \"download_url\": \"${{ steps.get-url.outputs.public_url }}\",
               \"storage_path\": \"${{ steps.get-url.outputs.storage_path }}\",
               \"file_size\": ${FILE_SIZE},
-              \"notes\": \"${SHORT}: ${MSG}\"
+              \"notes\": \"v${VERSION} · ${MSG}\"
             }"
-
-          echo "✅ ${{ matrix.device }} v${{ steps.get-url.outputs.version }} 배포 완료"
+          echo "✅ ${{ matrix.device }} v${VERSION} 배포 완료"
