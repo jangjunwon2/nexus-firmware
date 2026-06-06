@@ -147,13 +147,18 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          # 동일 장치+버전 기존 항목 먼저 제거 (중복 방지)
+          curl -s -X DELETE \
+            "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${{ matrix.device }}&version=eq.${VERSION}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}"
+
           MSG="${{ github.event.head_commit.message }}"
-          curl -sf -X POST \
+          HTTP=$(curl -s -o /tmp/reg_resp.txt -w "%{http_code}" -X POST \
             "${SUPABASE_URL}/rest/v1/firmware_releases" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -H "Prefer: resolution=merge-duplicates" \
             -d "{
               \"device_type\": \"${{ matrix.device }}\",
               \"version\": \"${VERSION}\",
@@ -162,7 +167,12 @@ jobs:
               \"file_size\": ${{ steps.upload.outputs.file_size }},
               \"is_active\": true,
               \"notes\": \"v${VERSION}: ${MSG}\"
-            }"
+            }")
+          echo "DB 등록 HTTP: ${HTTP}"
+          if [ "${HTTP}" -ge 400 ]; then
+            echo "오류: $(cat /tmp/reg_resp.txt)"
+            exit 1
+          fi
           echo "✅ ${{ matrix.device }} v${VERSION} 완료"
 
       - name: Delete old releases
