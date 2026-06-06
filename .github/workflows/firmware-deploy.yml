@@ -96,6 +96,7 @@ jobs:
           HTTP_STATUS=$(curl -s -o /tmp/upload_response.txt -w "%{http_code}" -X POST \
             "${SUPABASE_URL}/storage/v1/object/firmware/${STORAGE_PATH}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/octet-stream" \
             -H "x-upsert: true" \
             --data-binary @"${BIN}")
