@@ -4,7 +4,6 @@
 
 #include "config.h"
 #include "utils.h"
-#include "espnow_comm_shared.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -12,11 +11,18 @@ class HardwareManager;
 class CommManager;
 class WebManager;
 
-enum class IdSetState { IDLE, ENTERED, AWAITING_INPUT, CONFIRMING_ON, CONFIRMING_BLINK };
+enum class IdSetState {
+    IDLE,
+    ENTERED,
+    AWAITING_INPUT,
+    CONFIRMING_ON,
+    CONFIRMING_BLINK
+};
 
 class ModeManager {
 public:
     ModeManager(HardwareManager* hwManager, CommManager* commManager, WebManager* webManager);
+    
     void begin();
     void update();
 
@@ -24,7 +30,7 @@ public:
     void handleEspNowCommand(const uint8_t* senderMac, const Comm::CommPacket& pkt, uint32_t rxTime);
     void triggerManualRun(uint32_t delayMs, uint32_t playMs);
     void switchToMode(DeviceMode newMode, bool forceSwitch = false);
-
+    
     DeviceMode getCurrentMode() const;
     const char* getCurrentModeName() const;
 
@@ -33,7 +39,7 @@ public:
     void updateDeviceId(uint8_t newId, bool fromWeb = false);
     void setUpdateDownloaded(bool downloaded);
     void applyUpdateAndReboot();
-    
+
     // [NEW] 페어링 성공 시 통신 매니저에서 호출
     void notifyPairingSuccess();
 
@@ -44,23 +50,22 @@ private:
 
     DeviceMode _currentMode;
     uint8_t _deviceId;
-
     SemaphoreHandle_t _modeSwitchMutex;
-    SemaphoreHandle_t _playSequenceMutex;
     uint32_t _currentCommandId;
 
     ExecutionStep _executionPlan[MAX_EXECUTION_STEPS];
     uint8_t _planStepCount;
-    int8_t _currentStepIndex; 
+    uint8_t _currentStepIndex;
 
     IdSetState _idSetState;
     uint8_t _temporaryId;
     unsigned long _idSetLastInputTime;
 
+    bool _isPlaySequenceActive;
     bool _isManualOperationActive;
     bool _isDelayPhase;
-    unsigned long _delayPhaseEndTime;
-    unsigned long _playPhaseEndTime;
+    unsigned long _phaseEndTime;
+    unsigned long _lastExecButtonActionTime;
 
     unsigned long _lastWebApiActivityTime;
     bool _updateDownloaded;
@@ -68,7 +73,7 @@ private:
     uint8_t _previousDeviceId;
     
     // [NEW] 페어링 대기열 타임아웃용 타이머
-    unsigned long _pairingStartTime;
+    unsigned long _pairingStartTime; 
 
     void enterModeLogic(DeviceMode mode);
     void exitModeLogic(DeviceMode mode);
@@ -80,12 +85,12 @@ private:
     void updateModeWifi();
     void updateModeExitWifi();
     void updateModePairing(); // [NEW] 페어링 모드 업데이트 루프
-    
-    void updateExecutionPlan();
-    void startExecutionPlan(const Comm::CommPacket& pkt);
-    void startNextStep();
-    void stopExecutionPlan();
+    void updatePlaySequence(); 
 
+    void startPlaySequence(const ExecutionStep* steps, uint8_t stepCount, uint32_t rttUs, uint32_t rxProcUs);
+    void stopPlaySequence();
+    void startNextStep();
+    
     void incrementTemporaryId();
     void finalizeIdSelection();
     const char* getModeName(DeviceMode mode) const;
