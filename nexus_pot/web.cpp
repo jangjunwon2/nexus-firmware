@@ -26,7 +26,7 @@ WebManager::WebManager() :
     _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
     _isServerRunning(false), _otaUpdateDownloaded(false), 
     _isScanningWifi(false), _isConnectingWifi(false),
-    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaUpdateAvailable(false),
+    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaFirmwareUrl(""), _otaUpdateAvailable(false),
     _wifiEventId(0), _lastDisconnectReason(0), _wifiConnectStartMillis(0),
     _disconnectedForTestSsid(""), _reconnectOnExitTest(false)
 {
@@ -784,13 +784,18 @@ void WebManager::handleRunTestApi(AsyncWebServerRequest* request) {
 
 void WebManager::handleDisconnectWifiApi(AsyncWebServerRequest* request) {
     Log::Info(PSTR("WEB: Received disconnect request."));
-    if (request->hasParam("ssid", true)) {
+
+    // "forget=true" 파라미터가 있을 때만 NVS 자격증명 삭제
+    bool forget = request->hasParam("forget", true) &&
+                  request->getParam("forget", true)->value() == "true";
+
+    if (forget && request->hasParam("ssid", true)) {
         String ssidToForget = request->getParam("ssid", true)->value();
-        Utils::removeWifiCredential(ssidToForget); // Remove credential from NVS
+        Utils::removeWifiCredential(ssidToForget);
         Log::Info(PSTR("WEB: Wi-Fi credential for %s was forgotten."), ssidToForget.c_str());
     }
-    
-    WiFi.disconnect(true, true); // Disconnect from WiFi and erase credentials
+
+    WiFi.disconnect(); // 연결만 끊고 저장된 자격증명은 유지
     request->send(200, "application/json", "{\"status\":\"disconnected\"}");
 }
 
@@ -1006,7 +1011,8 @@ bool WebManager::fetchOtaVersionInfo() {
         if (deserializeJson(doc, http.getStream()) == DeserializationError::Ok) {
             xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
             _latestOtaVersion = doc["version"].as<String>();
-            _otaChangeLog = doc["changelog"].as<String>();
+            _otaChangeLog = doc["notes"].as<String>();
+            _otaFirmwareUrl = doc["url"].as<String>();
             _otaUpdateAvailable = isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
             xSemaphoreGive(_otaDataMutex);
             http.end();
@@ -1027,13 +1033,26 @@ void WebManager::downloadAndApplyOta() {
         doc["success"] = false;
         doc["message"] = "OTA Failed: No Internet Connection.";
     } else {
+        xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
+        String firmwareUrl = _otaFirmwareUrl;
+        xSemaphoreGive(_otaDataMutex);
+
+        if (firmwareUrl.isEmpty()) {
+            doc["success"] = false;
+            doc["message"] = "OTA Failed: No firmware URL. Check version first.";
+            broadcastJson(doc);
+            esp_task_wdt_delete(NULL);
+            vTaskDelete(NULL);
+            return;
+        }
+
         HTTPClient http;
         WiFiClientSecure client;
         client.setInsecure();
-        
-        http.begin(client, OTA_FIRMWARE_URL);
+
+        http.begin(client, firmwareUrl);
         int httpCode = http.GET();
-        
+
         if (httpCode == HTTP_CODE_OK) {
             int contentLength = http.getSize();
             if (contentLength > 0 && Update.begin(contentLength)) {
