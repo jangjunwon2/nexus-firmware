@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - id: find
         run: |
@@ -34,11 +34,18 @@ jobs:
               | sort -u \
               | jq -Rc . | jq -sc .)
           else
-            # push 이벤트: 변경된 장치 폴더만 빌드
-            CHANGED_DIRS=$(git diff --name-only HEAD~1 HEAD \
-              | grep -v '^\.github/' \
-              | sed 's|/.*||' \
-              | sort -u)
+            # push 이벤트: push에 포함된 전체 변경 파일 기준으로 장치 감지
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              # 초기 push인 경우 모든 장치 빌드
+              CHANGED_DIRS=$(find . -name "*.ino" -not -path "*/.git/*" \
+                | xargs -I{} dirname {} | sed 's|^\./||' | sort -u)
+            else
+              CHANGED_DIRS=$(git diff --name-only "$BEFORE" HEAD \
+                | grep -v '^\.github/' \
+                | sed 's|/.*||' \
+                | sort -u)
+            fi
 
             DEVICES="[]"
             for DIR in $CHANGED_DIRS; do
