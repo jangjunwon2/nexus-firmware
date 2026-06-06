@@ -26,7 +26,7 @@ jobs:
         run: |
           VERSION=$(cat version.txt | tr -d '[:space:]')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "빌드 버전: $VERSION"
+          echo "버전: $VERSION"
 
       - id: find
         run: |
@@ -36,7 +36,7 @@ jobs:
             | sort -u \
             | jq -R . | jq -sc .)
           echo "matrix=$DEVICES" >> $GITHUB_OUTPUT
-          echo "발견된 장치: $DEVICES"
+          echo "장치: $DEVICES"
 
   build:
     needs: discover
@@ -72,56 +72,57 @@ jobs:
 
       - name: Compile
         run: |
-          mkdir -p build
           SKETCH=$(find ./${{ matrix.device }} -name "*.ino" | head -1)
-          echo "빌드: $SKETCH (v${{ needs.discover.outputs.version }})"
+          echo "빌드: $SKETCH"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             "$SKETCH" \
             --output-dir ./build
 
-      - name: Get signed upload URL
-        id: get-url
+      - name: Upload binary to Supabase Storage
+        id: upload
         env:
-          FIRMWARE_CI_TOKEN: ${{ secrets.FIRMWARE_CI_TOKEN }}
-          VERSION: ${{ needs.discover.outputs.version }}
-        run: |
-          FILENAME="firmware-v${VERSION}.bin"
-          RESPONSE=$(curl -sf -X POST \
-            https://mystic-lab.vercel.app/api/admin/firmware/upload-url \
-            -H "Authorization: Bearer ${FIRMWARE_CI_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{\"device_type\":\"${{ matrix.device }}\",\"version\":\"${VERSION}\",\"filename\":\"${FILENAME}\"}")
-          echo "signed_url=$(echo "$RESPONSE" | jq -r '.signedUrl')" >> "$GITHUB_OUTPUT"
-          echo "storage_path=$(echo "$RESPONSE" | jq -r '.storagePath')" >> "$GITHUB_OUTPUT"
-          echo "public_url=$(echo "$RESPONSE" | jq -r '.publicUrl')" >> "$GITHUB_OUTPUT"
-
-      - name: Upload binary
-        run: |
-          BIN=$(find ./build -name "*.bin" | head -1)
-          echo "업로드: $BIN ($(stat -c%s "$BIN") bytes)"
-          curl -sf -X PUT "${{ steps.get-url.outputs.signed_url }}" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"${BIN}"
-
-      - name: Register release
-        env:
-          FIRMWARE_CI_TOKEN: ${{ secrets.FIRMWARE_CI_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           VERSION: ${{ needs.discover.outputs.version }}
         run: |
           BIN=$(find ./build -name "*.bin" | head -1)
           FILE_SIZE=$(stat -c%s "$BIN")
+          STORAGE_PATH="${{ matrix.device }}/${VERSION}/firmware-v${VERSION}.bin"
+          PUBLIC_URL="${SUPABASE_URL}/storage/v1/object/public/firmware/${STORAGE_PATH}"
+
+          echo "업로드: $STORAGE_PATH (${FILE_SIZE} bytes)"
+          curl -sf -X POST \
+            "${SUPABASE_URL}/storage/v1/object/firmware/${STORAGE_PATH}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/octet-stream" \
+            -H "x-upsert: true" \
+            --data-binary @"${BIN}"
+
+          echo "storage_path=${STORAGE_PATH}" >> "$GITHUB_OUTPUT"
+          echo "public_url=${PUBLIC_URL}" >> "$GITHUB_OUTPUT"
+          echo "file_size=${FILE_SIZE}" >> "$GITHUB_OUTPUT"
+
+      - name: Register release in database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          VERSION: ${{ needs.discover.outputs.version }}
+        run: |
           MSG="${{ github.event.head_commit.message }}"
           curl -sf -X POST \
-            https://mystic-lab.vercel.app/api/admin/firmware \
-            -H "Authorization: Bearer ${FIRMWARE_CI_TOKEN}" \
+            "${SUPABASE_URL}/rest/v1/firmware_releases" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
             -d "{
               \"device_type\": \"${{ matrix.device }}\",
               \"version\": \"${VERSION}\",
-              \"download_url\": \"${{ steps.get-url.outputs.public_url }}\",
-              \"storage_path\": \"${{ steps.get-url.outputs.storage_path }}\",
-              \"file_size\": ${FILE_SIZE},
-              \"notes\": \"v${VERSION} · ${MSG}\"
+              \"download_url\": \"${{ steps.upload.outputs.public_url }}\",
+              \"storage_path\": \"${{ steps.upload.outputs.storage_path }}\",
+              \"file_size\": ${{ steps.upload.outputs.file_size }},
+              \"is_active\": true,
+              \"notes\": \"v${VERSION}: ${MSG}\"
             }"
-          echo "✅ ${{ matrix.device }} v${VERSION} 배포 완료"
+          echo "✅ ${{ matrix.device }} v${VERSION} 완료"
