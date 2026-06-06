@@ -1,8 +1,3 @@
-/**
- * @file hardware.h
- * @brief HardwareManager 클래스의 헤더 파일입니다.
- * @version 4.2.0
- */
 #pragma once
 #ifndef HARDWARE_H
 #define HARDWARE_H
@@ -20,11 +15,11 @@ public:
     void setLedPattern(LedPatternType pattern, int repeatCount = 0);
     bool isLedPatternActive() const;
     
-    void setMosfets(uint8_t pwmValue);
+    // PWM 제어 방식 (0~100)
+    void setMosfets(uint8_t pwmValue); 
     
     void shutdownOutputs();
     LedPatternType getCurrentLedPattern() const;
-    // [REMOVED] bool isPowerSwitchOn() const; // 삭제됨
 
 private:
     static void hardwareTask(void* arg);
@@ -32,7 +27,6 @@ private:
     void updateLed();
     void setLed(bool on);
 
-    // Button states
     bool _idButtonState;
     bool _execButtonState;
     unsigned long _lastIdDebounceTime;
@@ -44,13 +38,12 @@ private:
     std::atomic<ButtonEventType> _currentButtonEvent;
     unsigned long _execButtonPressedDuration;
 
-    // LED states
     std::atomic<LedPatternType> _currentLedPattern;
     int _ledTargetBlinkCount;
     unsigned long _ledPatternStartTime;
     bool _ledState;
     
-    std::atomic<uint8_t> _mosfetPwmValue; // 0-100
+    std::atomic<uint8_t> _mosfetPwmValue; 
 };
 
 #endif // HARDWARE_H

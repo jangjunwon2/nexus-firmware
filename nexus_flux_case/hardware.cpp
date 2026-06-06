@@ -4,21 +4,31 @@ constexpr double PWM_FREQ = 5000.0;
 constexpr uint8_t PWM_RESOLUTION = 8; 
 
 HardwareManager::HardwareManager() :
-    _idButtonState(false), _execButtonState(false),
-    _lastIdDebounceTime(0), _lastExecDebounceTime(0),
-    _idButtonPressTimestamp(0), _execButtonPressTimestamp(0), _bothButtonsPressTimestamp(0),
+    _idButtonState(false), 
+    _execButtonState(false),
+    _lastIdDebounceTime(0), 
+    _lastExecDebounceTime(0),
+    _idButtonPressTimestamp(0), 
+    _execButtonPressTimestamp(0), 
+    _bothButtonsPressTimestamp(0),
     _inBothPressSequence(false),
     _currentButtonEvent(ButtonEventType::NO_EVENT),
     _execButtonPressedDuration(0),
     _currentLedPattern(LedPatternType::LED_OFF),
-    _ledTargetBlinkCount(0), _ledPatternStartTime(0),
-    _ledState(false), _mosfetPwmValue(0)
+    _ledTargetBlinkCount(0), 
+    _ledPatternStartTime(0),
+    _ledState(false), 
+    _mosfetPwmValue(0)
 {}
 
 void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     pinMode(LED_PIN, OUTPUT);
+    
+    // [NEW] 승압 회로 핀 초기화
+    pinMode(BOOST_EN_PIN, OUTPUT);
+    digitalWrite(BOOST_EN_PIN, LOW);
     
     ledcAttach(MOSFET_PIN_1, PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(MOSFET_PIN_2, PWM_FREQ, PWM_RESOLUTION);
@@ -42,7 +52,7 @@ void HardwareManager::hardwareTask(void* arg) {
 }
 
 ButtonEventType HardwareManager::getButtonEvent() {
-    ButtonEventType event = _currentButtonEvent;
+    ButtonEventType event = _currentButtonEvent.load();
     if (event != ButtonEventType::NO_EVENT) {
         _currentButtonEvent = ButtonEventType::NO_EVENT;
     }
@@ -116,7 +126,7 @@ void HardwareManager::processButtonInput() {
 }
 
 void HardwareManager::setLedPattern(LedPatternType pattern, int repeatCount) {
-    if (_currentLedPattern == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
+    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
         return;
     }
     _currentLedPattern = pattern;
@@ -125,12 +135,14 @@ void HardwareManager::setLedPattern(LedPatternType pattern, int repeatCount) {
 }
 
 void HardwareManager::updateLed() {
-    if (_currentLedPattern == LedPatternType::LED_OFF) { if (_ledState) setLed(false); return; }
-    if (_currentLedPattern == LedPatternType::LED_ON) { if (!_ledState) setLed(true); return; }
+    LedPatternType pattern = _currentLedPattern.load();
+
+    if (pattern == LedPatternType::LED_OFF) { if (_ledState) setLed(false); return; }
+    if (pattern == LedPatternType::LED_ON) { if (!_ledState) setLed(true); return; }
 
     unsigned long elapsedTime = millis() - _ledPatternStartTime;
 
-    switch (_currentLedPattern) {
+    switch (pattern) {
         case LedPatternType::LED_BOOT_SUCCESS:
             setLed(elapsedTime < LED_BOOT_SUCCESS_ON_MS);
             if (elapsedTime >= LED_BOOT_SUCCESS_ON_MS) _currentLedPattern = LedPatternType::LED_OFF;
@@ -173,7 +185,6 @@ void HardwareManager::updateLed() {
             setLed((elapsedTime / LED_ID_BLINK_INTERVAL_MS) % 2 == 0);
             break;
             
-        // [NEW] 페어링 대기 중 아주 빠른 점멸 (50ms)
         case LedPatternType::LED_PAIRING:
             setLed((elapsedTime / 50) % 2 == 0);
             break;
@@ -182,8 +193,14 @@ void HardwareManager::updateLed() {
     }
 }
 
-bool HardwareManager::isLedPatternActive() const { return _currentLedPattern != LedPatternType::LED_OFF; }
-void HardwareManager::setLed(bool on) { if (_ledState != on) { _ledState = on; digitalWrite(LED_PIN, _ledState); } }
+bool HardwareManager::isLedPatternActive() const { return _currentLedPattern.load() != LedPatternType::LED_OFF; }
+
+void HardwareManager::setLed(bool on) { 
+    if (_ledState != on) { 
+        _ledState = on; 
+        digitalWrite(LED_PIN, _ledState); 
+    } 
+}
 
 void HardwareManager::setMosfets(uint8_t pwmValue) { 
     int dutyCycle = map(pwmValue, 0, 100, 0, 255);
@@ -191,13 +208,20 @@ void HardwareManager::setMosfets(uint8_t pwmValue) {
     if (dutyCycle < 0) dutyCycle = 0;
     if (dutyCycle > 255) dutyCycle = 255;
 
-    if (_mosfetPwmValue != pwmValue) { 
+    if (_mosfetPwmValue.load() != pwmValue) { 
         _mosfetPwmValue = pwmValue; 
         
+        // [NEW] 모스펫을 작동시킬 때(pwmValue > 0) Boost 회로도 함께 켭니다.
+        if (pwmValue > 0) {
+            digitalWrite(BOOST_EN_PIN, HIGH);
+        } else {
+            digitalWrite(BOOST_EN_PIN, LOW);
+        }
+
         ledcWrite(MOSFET_PIN_1, dutyCycle); 
         ledcWrite(MOSFET_PIN_2, dutyCycle);
         
-        Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d)"), pwmValue, dutyCycle); 
+        Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d) / Boost EN: %s"), pwmValue, dutyCycle, pwmValue > 0 ? "ON" : "OFF"); 
     } 
 }
 
@@ -208,5 +232,5 @@ void HardwareManager::shutdownOutputs() {
 }
 
 LedPatternType HardwareManager::getCurrentLedPattern() const {
-    return _currentLedPattern;
+    return _currentLedPattern.load();
 }
