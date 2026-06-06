@@ -194,7 +194,6 @@ void CommManager::channelHoppingTask(void* param) {
                 if (self->_currentHopChannel != targetChannel) {
                     self->_currentHopChannel = targetChannel;
                     esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
-                    // 디버그 로그가 너무 잦을 수 있으므로 Info 대신 Debug로 출력
                     Log::Debug(PSTR("COMM: Channel lost. Hopping to Ch %d"), targetChannel);
                 }
                 vTaskDelay(pdMS_TO_TICKS(Comm::CHANNEL_SWITCH_INTERVAL_MS));
