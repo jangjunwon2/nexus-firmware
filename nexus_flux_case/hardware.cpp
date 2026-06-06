@@ -1,7 +1,10 @@
+/**
+ * @file hardware.cpp
+ * @brief HardwareManager 클래스의 구현입니다.
+ * @version 5.0.0
+ * @date 2024-08-30
+ */
 #include "hardware.h"
-
-constexpr double PWM_FREQ = 5000.0; 
-constexpr uint8_t PWM_RESOLUTION = 8; 
 
 HardwareManager::HardwareManager() :
     _idButtonState(false), _execButtonState(false),
@@ -12,19 +15,19 @@ HardwareManager::HardwareManager() :
     _execButtonPressedDuration(0),
     _currentLedPattern(LedPatternType::LED_OFF),
     _ledTargetBlinkCount(0), _ledPatternStartTime(0),
-    _ledState(false), _mosfetPwmValue(0)
+    _ledState(false), _mosfetState(false)
 {}
 
 void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     pinMode(LED_PIN, OUTPUT);
-    
-    ledcAttach(MOSFET_PIN_1, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(MOSFET_PIN_2, PWM_FREQ, PWM_RESOLUTION);
-    
+    pinMode(MOSFET_PIN_1, OUTPUT);
+    pinMode(MOSFET_PIN_2, OUTPUT);
+    pinMode(BOOST_EN_PIN, OUTPUT); // [NEW] 24V 승압 모듈 EN 핀 활성화
+
     setLed(false);
-    setMosfets(0);
+    setMosfets(false);
 
     xTaskCreatePinnedToCore(hardwareTask, "HardwareTask", 4096, this, 2, NULL, 0);
     Log::Info(PSTR("HW: Hardware monitoring task started on Core 0."));
@@ -42,7 +45,7 @@ void HardwareManager::hardwareTask(void* arg) {
 }
 
 ButtonEventType HardwareManager::getButtonEvent() {
-    ButtonEventType event = _currentButtonEvent;
+    ButtonEventType event = _currentButtonEvent.load();
     if (event != ButtonEventType::NO_EVENT) {
         _currentButtonEvent = ButtonEventType::NO_EVENT;
     }
@@ -55,7 +58,7 @@ unsigned long HardwareManager::getExecButtonPressedDuration() const {
 
 void HardwareManager::processButtonInput() {
     unsigned long currentTime = millis();
-    
+
     bool idPressedNow = (digitalRead(ID_BUTTON_PIN) == LOW);
     if (idPressedNow != _idButtonState && (currentTime - _lastIdDebounceTime > DEBOUNCE_DELAY_MS)) {
         _idButtonState = idPressedNow;
@@ -116,21 +119,23 @@ void HardwareManager::processButtonInput() {
 }
 
 void HardwareManager::setLedPattern(LedPatternType pattern, int repeatCount) {
-    if (_currentLedPattern == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
+    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
         return;
     }
     _currentLedPattern = pattern;
     _ledTargetBlinkCount = repeatCount;
     _ledPatternStartTime = millis();
+    Log::Debug(PSTR("HW: Setting LED pattern to %d, repeat: %d"), static_cast<int>(pattern), repeatCount);
 }
 
 void HardwareManager::updateLed() {
-    if (_currentLedPattern == LedPatternType::LED_OFF) { if (_ledState) setLed(false); return; }
-    if (_currentLedPattern == LedPatternType::LED_ON) { if (!_ledState) setLed(true); return; }
+    LedPatternType pattern = _currentLedPattern.load();
+    if (pattern == LedPatternType::LED_OFF) { if (_ledState) setLed(false); return; }
+    if (pattern == LedPatternType::LED_ON) { if (!_ledState) setLed(true); return; }
 
     unsigned long elapsedTime = millis() - _ledPatternStartTime;
 
-    switch (_currentLedPattern) {
+    switch (pattern) {
         case LedPatternType::LED_BOOT_SUCCESS:
             setLed(elapsedTime < LED_BOOT_SUCCESS_ON_MS);
             if (elapsedTime >= LED_BOOT_SUCCESS_ON_MS) _currentLedPattern = LedPatternType::LED_OFF;
@@ -141,7 +146,7 @@ void HardwareManager::updateLed() {
         case LedPatternType::LED_ID_SET_CONFIRM:
             setLed(elapsedTime < LED_ID_SET_CONFIRM_ON_MS);
              if (elapsedTime >= LED_ID_SET_CONFIRM_ON_MS) {
-                 _currentLedPattern = LedPatternType::LED_OFF;
+                _currentLedPattern = LedPatternType::LED_OFF;
             }
             break;
         case LedPatternType::LED_ID_SET_INCREMENT:
@@ -151,7 +156,6 @@ void HardwareManager::updateLed() {
         case LedPatternType::LED_ID_DISPLAY: {
             unsigned long blinkDuration = 2 * LED_ID_BLINK_INTERVAL_MS;
             unsigned long totalDuration = (unsigned long)_ledTargetBlinkCount * blinkDuration;
-
             if (elapsedTime >= totalDuration) {
                 setLed(false);
                 _currentLedPattern = LedPatternType::LED_OFF;
@@ -182,31 +186,41 @@ void HardwareManager::updateLed() {
     }
 }
 
-bool HardwareManager::isLedPatternActive() const { return _currentLedPattern != LedPatternType::LED_OFF; }
-void HardwareManager::setLed(bool on) { if (_ledState != on) { _ledState = on; digitalWrite(LED_PIN, _ledState); } }
+bool HardwareManager::isLedPatternActive() const { return _currentLedPattern.load() != LedPatternType::LED_OFF; }
 
-void HardwareManager::setMosfets(uint8_t pwmValue) { 
-    int dutyCycle = map(pwmValue, 0, 100, 0, 255);
-    
-    if (dutyCycle < 0) dutyCycle = 0;
-    if (dutyCycle > 255) dutyCycle = 255;
+void HardwareManager::setLed(bool on) {
+    if (_ledState != on) {
+        _ledState = on;
+        digitalWrite(LED_PIN, _ledState);
+    }
+}
 
-    if (_mosfetPwmValue != pwmValue) { 
-        _mosfetPwmValue = pwmValue; 
+void HardwareManager::setMosfets(bool on) {
+    if (_mosfetState.load() != on) {
+        _mosfetState = on;
         
-        ledcWrite(MOSFET_PIN_1, dutyCycle); 
-        ledcWrite(MOSFET_PIN_2, dutyCycle);
+        // [NEW] 전자석을 켜기 전 부스트 컨버터를 먼저 활성화
+        if (on) {
+            digitalWrite(BOOST_EN_PIN, HIGH); // 24V 승압 시작
+            delay(10); // 출력단 커패시터에 24V가 충전/안정화될 수 있도록 10ms 대기 (안전장치)
+            digitalWrite(MOSFET_PIN_1, HIGH); // 전자석 ON
+            digitalWrite(MOSFET_PIN_2, HIGH);
+        } else {
+            digitalWrite(MOSFET_PIN_1, LOW);  // 전자석 OFF
+            digitalWrite(MOSFET_PIN_2, LOW);
+            digitalWrite(BOOST_EN_PIN, LOW);  // 부하가 꺼지면 승압 IC도 꺼서 배터리 소모 최소화
+        }
         
-        Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d)"), pwmValue, dutyCycle); 
-    } 
+        Log::Info(PSTR("HW: MOSFETs & BOOST turned %s."), on ? "ON" : "OFF");
+    }
 }
 
 void HardwareManager::shutdownOutputs() {
-    setMosfets(0); 
+    setMosfets(false);
     setLed(false);
     Log::Info(PSTR("HW: All outputs shutdown."));
 }
 
 LedPatternType HardwareManager::getCurrentLedPattern() const {
-    return _currentLedPattern;
+    return _currentLedPattern.load();
 }

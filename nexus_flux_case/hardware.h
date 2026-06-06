@@ -1,7 +1,8 @@
 /**
  * @file hardware.h
  * @brief HardwareManager 클래스의 헤더 파일입니다.
- * @version 4.2.0
+ * @version 5.0.0
+ * @date 2024-08-30
  */
 #pragma once
 #ifndef HARDWARE_H
@@ -19,12 +20,9 @@ public:
     unsigned long getExecButtonPressedDuration() const;
     void setLedPattern(LedPatternType pattern, int repeatCount = 0);
     bool isLedPatternActive() const;
-    
-    void setMosfets(uint8_t pwmValue);
-    
+    void setMosfets(bool on); // `setMosfetState`에서 이름 변경
     void shutdownOutputs();
     LedPatternType getCurrentLedPattern() const;
-    // [REMOVED] bool isPowerSwitchOn() const; // 삭제됨
 
 private:
     static void hardwareTask(void* arg);
@@ -49,8 +47,7 @@ private:
     int _ledTargetBlinkCount;
     unsigned long _ledPatternStartTime;
     bool _ledState;
-    
-    std::atomic<uint8_t> _mosfetPwmValue; // 0-100
+    std::atomic<bool> _mosfetState;
 };
 
 #endif // HARDWARE_H

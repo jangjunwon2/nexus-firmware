@@ -1,186 +1,213 @@
 /**
  * @file web.cpp
- * @brief WebManager Class Implementation. Manages AP mode, web server, API, and OTA.
+ * @brief WebManager Class Implementation. Manages AP mode, web server, API, and
+ * OTA.
  * @version 8.4.0
  * @date 2024-06-17
  */
 
 #include "web.h"
-#include "mode.h"
 #include "comm.h"
+#include "mode.h"
 #include "utils.h"
-#include <vector>
-#include <algorithm>
-#include <Update.h>
 #include <HTTPClient.h>
+#include <Update.h>
 #include <WiFiClientSecure.h>
+#include <algorithm>
 #include <esp_task_wdt.h>
+#include <vector>
 
 // External declaration for global instance defined in .ino file
 // WebManager webManager;
 
 // WebManager의 static 인스턴스 포인터 초기화
-WebManager* WebManager::_instance = nullptr;
+WebManager *WebManager::_instance = nullptr;
 
-WebManager::WebManager() :
-    _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
-    _isServerRunning(false), _otaUpdateDownloaded(false), 
-    _isScanningWifi(false), _isConnectingWifi(false),
-    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaUpdateAvailable(false),
-    _wifiEventId(0), _lastDisconnectReason(0), _wifiConnectStartMillis(0),
-    _disconnectedForTestSsid(""), _reconnectOnExitTest(false)
-{
-    _otaDataMutex = xSemaphoreCreateMutex();
+WebManager::WebManager()
+    : _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
+      _isServerRunning(false), _otaUpdateDownloaded(false),
+      _isScanningWifi(false), _isConnectingWifi(false),
+      _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"),
+      _otaChangeLog("N/A"), _otaUpdateAvailable(false), _wifiEventId(0),
+      _lastDisconnectReason(0), _wifiConnectStartMillis(0),
+      _disconnectedForTestSsid(""), _reconnectOnExitTest(false) {
+  _otaDataMutex = xSemaphoreCreateMutex();
 }
 
-void WebManager::begin(ModeManager* modeMgr, CommManager* commMgr) {
-    _instance = this;
-    _modeManager = modeMgr;
-    _commManager = commMgr;
-    
-    setupRoutes();
-    setupWebSocket();
-    setupLogBroadcaster();
-    
-    xTaskCreatePinnedToCore(
-        [](void* param) { static_cast<WebManager*>(param)->loop(); },
-        "WebManagerLoop", 4096, this, 1, NULL, 1
-    );
-    Log::Info(PSTR("WEB: WebManager initialized."));
+void WebManager::begin(ModeManager *modeMgr, CommManager *commMgr) {
+  _instance = this;
+  _modeManager = modeMgr;
+  _commManager = commMgr;
+
+  setupRoutes();
+  setupWebSocket();
+  setupLogBroadcaster();
+
+  xTaskCreatePinnedToCore(
+      [](void *param) { static_cast<WebManager *>(param)->loop(); },
+      "WebManagerLoop", 4096, this, 1, NULL, 1);
+  Log::Info(PSTR("WEB: WebManager initialized."));
 }
 
 void WebManager::loop() {
-    for (;;) {
-        if (_isServerRunning.load()) {
-            _ws.cleanupClients();
-            if (_isConnectingWifi.load() && (millis() - _wifiConnectStartMillis > WIFI_CONNECT_TIMEOUT_MS)) {
-                _isConnectingWifi = false;
-                Log::Warn(PSTR("WEB: WiFi connection timed out."));
-                WiFi.disconnect(true, true); 
+  for (;;) {
+    if (_isServerRunning.load()) {
+      _ws.cleanupClients();
+      if (_isConnectingWifi.load() &&
+          (millis() - _wifiConnectStartMillis > WIFI_CONNECT_TIMEOUT_MS)) {
+        _isConnectingWifi = false;
+        Log::Warn(PSTR("WEB: WiFi connection timed out."));
+        WiFi.disconnect(true, true);
 
-                int reasonForBroadcast = (_lastDisconnectReason != 0) ? _lastDisconnectReason : 204;
-                broadcastWifiStatus("failed", reasonForBroadcast);
-                _lastDisconnectReason = 0;
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        int reasonForBroadcast =
+            (_lastDisconnectReason != 0) ? _lastDisconnectReason : 204;
+        broadcastWifiStatus("failed", reasonForBroadcast);
+        _lastDisconnectReason = 0;
+      }
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
 }
 
 void WebManager::startServer() {
-    if (_isServerRunning.load()) return;
-    Log::Info(PSTR("WEB: Starting web server..."));
-    uint8_t channel = _commManager->getChannel();
-    WiFi.mode(WIFI_AP_STA);
-    IPAddress apIP(AP_IP);
-    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    WiFi.softAP(AP_SSID, AP_PASSWORD, channel, 0, 4);
-    _wifiEventId = WiFi.onEvent(WebManager::onWiFiEvent);
-    _server.begin();
-    _isServerRunning = true;
-    _otaUpdateDownloaded = false;
-    if (_modeManager) _modeManager->setUpdateDownloaded(false);
-    Log::Info(PSTR("WEB: Server started. AP SSID: %s, Channel: %d"), AP_SSID, channel);
-    Log::Info(PSTR("WEB: Access Point IP: http://%s"), WiFi.softAPIP().toString().c_str());
+  if (_isServerRunning.load())
+    return;
+  Log::Info(PSTR("WEB: Starting web server..."));
+  uint8_t channel = _commManager->getChannel();
+  WiFi.mode(WIFI_AP_STA);
+  IPAddress apIP(AP_IP);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP(AP_SSID, AP_PASSWORD, channel, 0, 4);
+  _wifiEventId = WiFi.onEvent(WebManager::onWiFiEvent);
+  _server.begin();
+  _isServerRunning = true;
+  _otaUpdateDownloaded = false;
+  if (_modeManager)
+    _modeManager->setUpdateDownloaded(false);
+  Log::Info(PSTR("WEB: Server started. AP SSID: %s, Channel: %d"), AP_SSID,
+            channel);
+  Log::Info(PSTR("WEB: Access Point IP: http://%s"),
+            WiFi.softAPIP().toString().c_str());
 }
 
 void WebManager::stopServer() {
-    if (!_isServerRunning.load()) return;
-    Log::Info(PSTR("WEB: Stopping web server..."));
+  if (!_isServerRunning.load())
+    return;
+  Log::Info(PSTR("WEB: Stopping web server..."));
 
-    // [수정] 서버 객체를 정리하기 전에 루프가 더 이상 실행되지 않도록 플래그를 먼저 설정합니다.
-    _isServerRunning = false;
+  // [수정] 서버 객체를 정리하기 전에 루프가 더 이상 실행되지 않도록 플래그를
+  // 먼저 설정합니다.
+  _isServerRunning = false;
 
-    // 잠시 대기하여 WebManagerLoop가 플래그 변경을 인지할 시간을 줍니다.
-    vTaskDelay(pdMS_TO_TICKS(10)); 
+  // 잠시 대기하여 WebManagerLoop가 플래그 변경을 인지할 시간을 줍니다.
+  vTaskDelay(pdMS_TO_TICKS(10));
 
-    _ws.closeAll();
-    _server.end();
+  _ws.closeAll();
+  _server.end();
 
-    // 등록했던 WiFi 이벤트 핸들러를 안전하게 제거합니다.
-    if (_wifiEventId != 0) {
-        WiFi.removeEvent(_wifiEventId);
-        _wifiEventId = 0;
-    }
+  // 등록했던 WiFi 이벤트 핸들러를 안전하게 제거합니다.
+  if (_wifiEventId != 0) {
+    WiFi.removeEvent(_wifiEventId);
+    _wifiEventId = 0;
+  }
 
-    Log::Info(PSTR("WEB: Server stopped."));
+  Log::Info(PSTR("WEB: Server stopped."));
 }
 
 void WebManager::reconnectWifiIfNeeded() {
-    if (_reconnectOnExitTest && !_disconnectedForTestSsid.isEmpty()) {
-        Log::Info(PSTR("WEB: Attempting to reconnect to Wi-Fi (%s) after exiting test mode."), _disconnectedForTestSsid.c_str());
-        String pass = Utils::loadWifiPassword(_disconnectedForTestSsid);
+  if (_reconnectOnExitTest && !_disconnectedForTestSsid.isEmpty()) {
+    Log::Info(PSTR("WEB: Attempting to reconnect to Wi-Fi (%s) after exiting "
+                   "test mode."),
+              _disconnectedForTestSsid.c_str());
+    String pass = Utils::loadWifiPassword(_disconnectedForTestSsid);
 
-        if (!pass.isEmpty()) {
-            WiFi.begin(_disconnectedForTestSsid.c_str(), pass.c_str());
-        } else {
-            Log::Warn(PSTR("WEB: Could not find Wi-Fi password for reconnection (%s)."), _disconnectedForTestSsid.c_str());
-        }
-        _disconnectedForTestSsid = "";
-        _reconnectOnExitTest = false;
+    if (!pass.isEmpty()) {
+      WiFi.begin(_disconnectedForTestSsid.c_str(), pass.c_str());
+    } else {
+      Log::Warn(
+          PSTR("WEB: Could not find Wi-Fi password for reconnection (%s)."),
+          _disconnectedForTestSsid.c_str());
     }
+    _disconnectedForTestSsid = "";
+    _reconnectOnExitTest = false;
+  }
 }
 
 bool WebManager::isServerRunning() const { return _isServerRunning.load(); }
 
 void WebManager::performUpdateAndReboot() {
-    if (_otaUpdateDownloaded.load()) {
-        Log::Info(PSTR("WEB: Applying OTA update and rebooting..."));
-        ESP.restart();
-    }
+  if (_otaUpdateDownloaded.load()) {
+    Log::Info(PSTR("WEB: Applying OTA update and rebooting..."));
+    ESP.restart();
+  }
 }
 
 void WebManager::broadcastTestComplete() {
-    JsonDocument doc;
-    doc["type"] = "test_completed";
-    broadcastJson(doc);
+  JsonDocument doc;
+  doc["type"] = "test_completed";
+  broadcastJson(doc);
 }
 
 // --- Page and API Handler Implementations ---
 
 void WebManager::setupRoutes() {
-    _server.on("/", HTTP_GET, [this](AsyncWebServerRequest* r){ handleRoot(r); });
-    _server.on("/wifi", HTTP_GET, [this](AsyncWebServerRequest* r){ handleWifiConfigPage(r); });
-    _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest* r){ handleFirmwareUpdatePage(r); });
-    _server.on("/test", HTTP_GET, [this](AsyncWebServerRequest* r){ handleTestModePage(r); });
-    _server.on("/exit", HTTP_GET, [this](AsyncWebServerRequest* r){ handleExit(r); });
-    
-    _server.on("/api/scan-wifi", HTTP_GET, [this](AsyncWebServerRequest* r){ handleScanWifiApi(r); });
-    _server.on("/api/connect-wifi", HTTP_POST, [this](AsyncWebServerRequest* r){ handleConnectWifiApi(r); });
-    _server.on("/api/disconnect-wifi", HTTP_POST, [this](AsyncWebServerRequest* r){ handleDisconnectWifiApi(r); });
-    _server.on("/api/wifi-status", HTTP_GET, [this](AsyncWebServerRequest* r){ handleWifiStatusApi(r); });
-    _server.on("/api/check-ota", HTTP_GET, [this](AsyncWebServerRequest* r){ handleCheckOtaApi(r); });
-    _server.on("/api/download-ota", HTTP_POST, [this](AsyncWebServerRequest* r){ handleDownloadOtaApi(r); });
-    _server.on("/api/device-status", HTTP_GET, [this](AsyncWebServerRequest* r){ handleDeviceStatusApi(r); });
-    _server.on("/api/set-device-id", HTTP_POST, [this](AsyncWebServerRequest* r){ handleSetDeviceIdApi(r); });
-    _server.on("/api/run-test", HTTP_POST, [this](AsyncWebServerRequest* r){ handleRunTestApi(r); });
+  _server.on("/", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleRoot(r); });
+  _server.on("/wifi", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleWifiConfigPage(r); });
+  _server.on("/update", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleFirmwareUpdatePage(r); });
+  _server.on("/test", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleTestModePage(r); });
+  _server.on("/exit", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleExit(r); });
 
-    _server.onNotFound([this](AsyncWebServerRequest* r){ handleNotFound(r); });
+  _server.on("/api/scan-wifi", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleScanWifiApi(r); });
+  _server.on("/api/connect-wifi", HTTP_POST,
+             [this](AsyncWebServerRequest *r) { handleConnectWifiApi(r); });
+  _server.on("/api/disconnect-wifi", HTTP_POST,
+             [this](AsyncWebServerRequest *r) { handleDisconnectWifiApi(r); });
+  _server.on("/api/wifi-status", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleWifiStatusApi(r); });
+  _server.on("/api/check-ota", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleCheckOtaApi(r); });
+  _server.on("/api/download-ota", HTTP_POST,
+             [this](AsyncWebServerRequest *r) { handleDownloadOtaApi(r); });
+  _server.on("/api/device-status", HTTP_GET,
+             [this](AsyncWebServerRequest *r) { handleDeviceStatusApi(r); });
+  _server.on("/api/set-device-id", HTTP_POST,
+             [this](AsyncWebServerRequest *r) { handleSetDeviceIdApi(r); });
+  _server.on("/api/run-test", HTTP_POST,
+             [this](AsyncWebServerRequest *r) { handleRunTestApi(r); });
+
+  _server.onNotFound([this](AsyncWebServerRequest *r) { handleNotFound(r); });
 }
 
 void WebManager::setupWebSocket() {
-    _ws.onEvent([this](auto *s, auto *c, AwsEventType t, void *a, uint8_t *d, size_t l) { 
-        onWsEvent(s, c, t, a, d, l); 
-    });
-    _server.addHandler(&_ws);
+  _ws.onEvent([this](auto *s, auto *c, AwsEventType t, void *a, uint8_t *d,
+                     size_t l) { onWsEvent(s, c, t, a, d, l); });
+  _server.addHandler(&_ws);
 }
 
-void WebManager::handleRoot(AsyncWebServerRequest* request) {
-    if (_modeManager) _modeManager->recordWebApiActivity();
-    
-    // [FIX] 테스트 모드에서 복귀 시 WiFi 재연결을 위해 이 라인을 다시 추가합니다.
-    reconnectWifiIfNeeded();
-    
-    String html = getPageHeader("Nexus Pot");
-    html += "<div class='card'><h3>Wi-Fi Status</h3><p id='home-wifi-status'>Loading...</p></div>";
-    html += "<div class='card'><h3>Device Control</h3>"
-            "<p><a href='/wifi' class='btn'>Wi-Fi Settings</a></p>"
-            "<p><a href='/update' class='btn'>Firmware Update</a></p>"
-            "<p><a href='/test' class='btn'>Test Mode</a></p>"
-            "<p><a href='/exit' class='btn btn-danger'>Exit Wi-Fi Mode</a></p>"
-            "</div>";
-    html += getPageFooter(false);
-    html += R"rawliteral(
+void WebManager::handleRoot(AsyncWebServerRequest *request) {
+  if (_modeManager)
+    _modeManager->recordWebApiActivity();
+
+  // [FIX] 테스트 모드에서 복귀 시 WiFi 재연결을 위해 이 라인을 다시 추가합니다.
+  reconnectWifiIfNeeded();
+
+  String html = getPageHeader("Nexus Flux Case");
+  html += "<div class='card'><h3>Wi-Fi Status</h3><p "
+          "id='home-wifi-status'>Loading...</p></div>";
+  html += "<div class='card'><h3>Device Control</h3>"
+          "<p><a href='/wifi' class='btn'>Wi-Fi Settings</a></p>"
+          "<p><a href='/update' class='btn'>Firmware Update</a></p>"
+          "<p><a href='/test' class='btn'>Test Mode</a></p>"
+          "<p><a href='/exit' class='btn btn-danger'>Exit Wi-Fi Mode</a></p>"
+          "</div>";
+  html += getPageFooter(false);
+  html += R"rawliteral(
         <script>
             function connectWsForStatus(){
                 let ws = new WebSocket("ws://"+window.location.host+"/ws");
@@ -204,13 +231,14 @@ void WebManager::handleRoot(AsyncWebServerRequest* request) {
             window.onload = connectWsForStatus;
         </script>
     )rawliteral";
-    request->send(200, "text/html; charset=UTF-8", html);
+  request->send(200, "text/html; charset=UTF-8", html);
 }
 
-void WebManager::handleWifiConfigPage(AsyncWebServerRequest* request) {
-    if (_modeManager) _modeManager->recordWebApiActivity();
-    String html = getPageHeader("WiFi Settings");
-    html += R"rawliteral(
+void WebManager::handleWifiConfigPage(AsyncWebServerRequest *request) {
+  if (_modeManager)
+    _modeManager->recordWebApiActivity();
+  String html = getPageHeader("WiFi Settings");
+  html += R"rawliteral(
         <div class="card">
             <h2>Current WiFi Status</h2>
             <p id="conn-status">Loading...</p>
@@ -417,14 +445,15 @@ void WebManager::handleWifiConfigPage(AsyncWebServerRequest* request) {
             };
         </script>
     )rawliteral";
-    html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+  html += getPageFooter(true);
+  request->send(200, "text/html; charset=UTF-8", html);
 }
 
-void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest* request) {
-    if (_modeManager) _modeManager->recordWebApiActivity();
-    String html = getPageHeader("Firmware Update");
-    html += R"rawliteral(
+void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest *request) {
+  if (_modeManager)
+    _modeManager->recordWebApiActivity();
+  String html = getPageHeader("Firmware Update");
+  html += R"rawliteral(
         <div class='card'>
             <p>Current Version: <b id='current-v'>-</b><br>Latest on Server: <b id='latest-v'>-</b></p>
             <div id='update-info'>
@@ -537,22 +566,24 @@ void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest* request) {
             window.onload = connectWs;
         </script>
     )rawliteral";
-    html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+  html += getPageFooter(true);
+  request->send(200, "text/html; charset=UTF-8", html);
 }
 
-void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
-    if (_modeManager) _modeManager->switchToMode(DeviceMode::MODE_TEST);
+void WebManager::handleTestModePage(AsyncWebServerRequest *request) {
+  if (_modeManager)
+    _modeManager->switchToMode(DeviceMode::MODE_TEST);
 
-    if (WiFi.status() == WL_CONNECTED) {
-        Log::Info(PSTR("WEB: Entering Test Mode. Temporarily disconnecting Wi-Fi."));
-        _disconnectedForTestSsid = WiFi.SSID();
-        _reconnectOnExitTest = true;
-        WiFi.disconnect(true);
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+    Log::Info(
+        PSTR("WEB: Entering Test Mode. Temporarily disconnecting Wi-Fi."));
+    _disconnectedForTestSsid = WiFi.SSID();
+    _reconnectOnExitTest = true;
+    WiFi.disconnect(true);
+  }
 
-    String html = getPageHeader("Test Mode");
-    html += R"rawliteral(
+  String html = getPageHeader("Test Mode");
+  html += R"rawliteral(
         <div class='card'>
             <h3>Device Settings</h3>
             <table style='width:100%; text-align:left; border-spacing: 0 10px; border-collapse: separate;'>
@@ -669,439 +700,471 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
             };
         </script>
     )rawliteral";
-    html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+  html += getPageFooter(true);
+  request->send(200, "text/html; charset=UTF-8", html);
 }
 
-void WebManager::handleExit(AsyncWebServerRequest* request) {
-    String html = getPageHeader("Exiting Wi-Fi Mode");
-    html += "<p>The device will now return to normal operation. You can close this window.</p>";
-    if (_otaUpdateDownloaded.load()) {
-        html += "<p style='color:blue;font-weight:bold;'>An update was downloaded and will be applied on reboot.</p>";
-    }
-    html += getPageFooter(false);
-    request->send(200, "text/html; charset=UTF-8", html);
-    delay(100);
-    if (_modeManager) _modeManager->exitWifiMode();
+void WebManager::handleExit(AsyncWebServerRequest *request) {
+  String html = getPageHeader("Exiting Wi-Fi Mode");
+  html += "<p>The device will now return to normal operation. You can close "
+          "this window.</p>";
+  if (_otaUpdateDownloaded.load()) {
+    html += "<p style='color:blue;font-weight:bold;'>An update was downloaded "
+            "and will be applied on reboot.</p>";
+  }
+  html += getPageFooter(false);
+  request->send(200, "text/html; charset=UTF-8", html);
+  delay(100);
+  if (_modeManager)
+    _modeManager->exitWifiMode();
 }
 
-void WebManager::handleNotFound(AsyncWebServerRequest* request) { 
-    request->send(404, "text/plain", "Not Found"); 
+void WebManager::handleNotFound(AsyncWebServerRequest *request) {
+  request->send(404, "text/plain", "Not Found");
 }
 
-void WebManager::handleScanWifiApi(AsyncWebServerRequest* request) {
-    if (_isScanningWifi.load()) {
-        request->send(429, "application/json", "{\"status\":\"busy\", \"message\":\"Scan already in progress.\"}");
-        return;
-    }
-    _isScanningWifi = true;
-    xTaskCreate(wifiScanTask, "wifiScanTask", 4096, this, 5, NULL);
-    request->send(202, "application/json", "{\"status\":\"accepted\", \"message\":\"Scan started.\"}");
+void WebManager::handleScanWifiApi(AsyncWebServerRequest *request) {
+  if (_isScanningWifi.load()) {
+    request->send(
+        429, "application/json",
+        "{\"status\":\"busy\", \"message\":\"Scan already in progress.\"}");
+    return;
+  }
+  _isScanningWifi = true;
+  xTaskCreate(wifiScanTask, "wifiScanTask", 4096, this, 5, NULL);
+  request->send(202, "application/json",
+                "{\"status\":\"accepted\", \"message\":\"Scan started.\"}");
 }
 
-void WebManager::handleConnectWifiApi(AsyncWebServerRequest* request) {
-    if (_isConnectingWifi.load()) {
-        request->send(429, "application/json", "{\"error\":\"Connection already in progress\"}");
-        return;
-    }
-    if (!request->hasParam("ssid", true)) {
-        request->send(400, "application/json", "{\"error\":\"Missing SSID\"}");
-        return;
-    }
+void WebManager::handleConnectWifiApi(AsyncWebServerRequest *request) {
+  if (_isConnectingWifi.load()) {
+    request->send(429, "application/json",
+                  "{\"error\":\"Connection already in progress\"}");
+    return;
+  }
+  if (!request->hasParam("ssid", true)) {
+    request->send(400, "application/json", "{\"error\":\"Missing SSID\"}");
+    return;
+  }
 
-    String ssid = request->getParam("ssid", true)->value();
-    String password = request->hasParam("password", true) ? request->getParam("password", true)->value() : "";
+  String ssid = request->getParam("ssid", true)->value();
+  String password = request->hasParam("password", true)
+                        ? request->getParam("password", true)->value()
+                        : "";
 
-    Log::Info(PSTR("WEB: Received connect request for SSID: %s"), ssid.c_str());
+  Log::Info(PSTR("WEB: Received connect request for SSID: %s"), ssid.c_str());
 
-    _isConnectingWifi = true;
-    _wifiConnectStartMillis = millis();
+  _isConnectingWifi = true;
+  _wifiConnectStartMillis = millis();
 
-    Utils::saveWifiCredential(ssid, password);
-    
-    broadcastWifiStatus("connecting");
-    
-    WiFi.disconnect(true, true);
-    delay(100);
-    WiFi.begin(ssid.c_str(), password.c_str());
-    
-    request->send(202, "application/json", "{\"status\":\"connection_attempt_started\"}");
+  Utils::saveWifiCredential(ssid, password);
+
+  broadcastWifiStatus("connecting");
+
+  WiFi.disconnect(true, true);
+  delay(100);
+  WiFi.begin(ssid.c_str(), password.c_str());
+
+  request->send(202, "application/json",
+                "{\"status\":\"connection_attempt_started\"}");
 }
 
-void WebManager::handleWifiStatusApi(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    getWifiStatusJson(doc);
-    if(request) {
-        String output; 
-        serializeJson(doc, output);
-        request->send(200, "application/json", output);
-    }
-}
-
-void WebManager::handleCheckOtaApi(AsyncWebServerRequest* request) {
-    xTaskCreate(otaCheckVersionTask, "otaCheckTask", 4096, this, 5, NULL); // Create task to check for OTA updates
-    request->send(200, "application/json", "{\"status\":\"checking\"}");
-}
-
-void WebManager::handleDownloadOtaApi(AsyncWebServerRequest* request) {
-    xTaskCreate(otaDownloadTask, "otaDownloadTask", 10240, this, 2, NULL); // Create task to download OTA firmware
-    request->send(200, "application/json", "{\"status\":\"download_started\"}");
-}
-
-void WebManager::handleDeviceStatusApi(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    doc["device_id"] = Utils::loadDeviceId();
-    doc["test_delay_ms"] = Utils::loadTestDelay();
-    doc["test_play_ms"] = Utils::loadTestPlay();
-    String output; serializeJson(doc, output);
+void WebManager::handleWifiStatusApi(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  getWifiStatusJson(doc);
+  if (request) {
+    String output;
+    serializeJson(doc, output);
     request->send(200, "application/json", output);
+  }
 }
 
-void WebManager::handleSetDeviceIdApi(AsyncWebServerRequest* request) {
-    if (request->hasParam("id", true)) {
-        _modeManager->updateDeviceId(request->getParam("id", true)->value().toInt(), true); // Update device ID via ModeManager
-    }
-    request->send(200); // Send success response
+void WebManager::handleCheckOtaApi(AsyncWebServerRequest *request) {
+  xTaskCreate(otaCheckVersionTask, "otaCheckTask", 4096, this, 5,
+              NULL); // Create task to check for OTA updates
+  request->send(200, "application/json", "{\"status\":\"checking\"}");
 }
 
-void WebManager::handleRunTestApi(AsyncWebServerRequest* request) {
-    uint32_t delayMs = Utils::loadTestDelay(); // Get default delay
-    uint32_t playMs = Utils::loadTestPlay();   // Get default play duration
-
-    // Override with values from request if provided
-    if (request->hasParam("delay", true)) {
-        delayMs = request->getParam("delay", true)->value().toInt();
-    }
-    if (request->hasParam("play", true)) {
-        playMs = request->getParam("play", true)->value().toInt();
-    }
-
-    if (_modeManager) {
-        _modeManager->triggerManualRun(delayMs, playMs); // Trigger manual test run in ModeManager
-    }
-    request->send(200, "application/json", "{\"status\":\"started\"}");
+void WebManager::handleDownloadOtaApi(AsyncWebServerRequest *request) {
+  xTaskCreate(otaDownloadTask, "otaDownloadTask", 10240, this, 2,
+              NULL); // Create task to download OTA firmware
+  request->send(200, "application/json", "{\"status\":\"download_started\"}");
 }
 
-void WebManager::handleDisconnectWifiApi(AsyncWebServerRequest* request) {
-    Log::Info(PSTR("WEB: Received disconnect request."));
-    if (request->hasParam("ssid", true)) {
-        String ssidToForget = request->getParam("ssid", true)->value();
-        Utils::removeWifiCredential(ssidToForget); // Remove credential from NVS
-        Log::Info(PSTR("WEB: Wi-Fi credential for %s was forgotten."), ssidToForget.c_str());
-    }
-    
-    WiFi.disconnect(true, true); // Disconnect from WiFi and erase credentials
-    request->send(200, "application/json", "{\"status\":\"disconnected\"}");
+void WebManager::handleDeviceStatusApi(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  doc["device_id"] = Utils::loadDeviceId();
+  doc["test_delay_ms"] = Utils::loadTestDelay();
+  doc["test_play_ms"] = Utils::loadTestPlay();
+  String output;
+  serializeJson(doc, output);
+  request->send(200, "application/json", output);
+}
+
+void WebManager::handleSetDeviceIdApi(AsyncWebServerRequest *request) {
+  if (request->hasParam("id", true)) {
+    _modeManager->updateDeviceId(request->getParam("id", true)->value().toInt(),
+                                 true); // Update device ID via ModeManager
+  }
+  request->send(200); // Send success response
+}
+
+void WebManager::handleRunTestApi(AsyncWebServerRequest *request) {
+  uint32_t delayMs = Utils::loadTestDelay(); // Get default delay
+  uint32_t playMs = Utils::loadTestPlay();   // Get default play duration
+
+  // Override with values from request if provided
+  if (request->hasParam("delay", true)) {
+    delayMs = request->getParam("delay", true)->value().toInt();
+  }
+  if (request->hasParam("play", true)) {
+    playMs = request->getParam("play", true)->value().toInt();
+  }
+
+  if (_modeManager) {
+    _modeManager->triggerManualRun(
+        delayMs, playMs); // Trigger manual test run in ModeManager
+  }
+  request->send(200, "application/json", "{\"status\":\"started\"}");
+}
+
+void WebManager::handleDisconnectWifiApi(AsyncWebServerRequest *request) {
+  Log::Info(PSTR("WEB: Received disconnect request."));
+  if (request->hasParam("ssid", true)) {
+    String ssidToForget = request->getParam("ssid", true)->value();
+    Utils::removeWifiCredential(ssidToForget); // Remove credential from NVS
+    Log::Info(PSTR("WEB: Wi-Fi credential for %s was forgotten."),
+              ssidToForget.c_str());
+  }
+
+  WiFi.disconnect(true, true); // Disconnect from WiFi and erase credentials
+  request->send(200, "application/json", "{\"status\":\"disconnected\"}");
 }
 
 // --- Event Handlers & Helpers ---
 
 void WebManager::onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
-    if (!_instance) return;
-    
-    switch (event) {
-        case ARDUINO_EVENT_WIFI_STA_START:
-            Serial.println("WiFi client started");
-            break;
-            
-        case ARDUINO_EVENT_WIFI_STA_STOP:
-            Serial.println("WiFi client stopped");
-            break;
-            
-        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-            Serial.println("Connected to WiFi network");
-            _instance->_lastDisconnectReason = 0;
-            break;
-            
-        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            Serial.printf("Disconnected from WiFi network. Reason: %d\n", info.wifi_sta_disconnected.reason);
-            _instance->_lastDisconnectReason = info.wifi_sta_disconnected.reason;
+  if (!_instance)
+    return;
 
-            if (_instance->_isConnectingWifi.load()) {
-                int reason = info.wifi_sta_disconnected.reason;
-                if (reason == 15 || reason == 201 || reason == 2 || reason == 8) {
-                    Log::Warn(PSTR("WEB: WiFi connection failed with definitive reason: %d. Broadcasting failure."), reason);
-                    _instance->_isConnectingWifi = false;
-                    _instance->broadcastWifiStatus("failed", reason);
-                } else {
-                    Log::Debug(PSTR("WEB: Transient disconnect during connection attempt (Reason: %d). Waiting for final status."), reason);
-                }
-            } else {
-                _instance->broadcastWifiStatus("disconnected", info.wifi_sta_disconnected.reason);
-            }
-            break;
-            
-        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-            Serial.printf("Got IP address: %s\n", IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str());
-            if (_instance) {
-                if (_instance->_isConnectingWifi.load()) {
-                    _instance->_isConnectingWifi = false;
-                }
-                _instance->_lastDisconnectReason = 0;
-                _instance->broadcastWifiStatus("connected");
-            }
-            break;
-            
-        case ARDUINO_EVENT_WIFI_AP_START:
-            Serial.println("AP started");
-            break;
-            
-        case ARDUINO_EVENT_WIFI_AP_STOP:
-            Serial.println("AP stopped");
-            break;
-            
-        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
-            Serial.println("Client connected to AP");
-            break;
-            
-        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
-            Serial.println("Client disconnected from AP");
-            break;
-        default:
-            break;
-    }
-}
+  switch (event) {
+  case ARDUINO_EVENT_WIFI_STA_START:
+    Serial.println("WiFi client started");
+    break;
 
-void WebManager::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-    if (_modeManager) _modeManager->recordWebApiActivity();
-    if (type == WS_EVT_CONNECT) {
-        Log::Debug(PSTR("WEB: WebSocket client #%u connected from %s"), client->id(), client->remoteIP().toString().c_str());
-        
-        JsonDocument doc;
-        getWifiStatusJson(doc);
-        doc["type"] = "wifi_status_update";
-        
-        String output;
-        serializeJson(doc, output);
-        client->text(output);
-        
-        broadcastOtaStatus();
-    } else if (type == WS_EVT_DISCONNECT) {
-        Log::Debug(PSTR("WEB: WebSocket client #%u disconnected."), client->id());
-    }
-}
+  case ARDUINO_EVENT_WIFI_STA_STOP:
+    Serial.println("WiFi client stopped");
+    break;
 
-void WebManager::wifiScanTask(void* pvParameters) {
-    WebManager* self = static_cast<WebManager*>(pvParameters);
-    Log::Info(PSTR("WEB: Starting WiFi scan..."));
+  case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+    Serial.println("Connected to WiFi network");
+    _instance->_lastDisconnectReason = 0;
+    break;
 
-    int n = WiFi.scanNetworks();
-    
-    JsonDocument doc;
-    doc["type"] = "scan_result";
-    JsonArray networksArray = doc["networks"].to<JsonArray>();
+  case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+    Serial.printf("Disconnected from WiFi network. Reason: %d\n",
+                  info.wifi_sta_disconnected.reason);
+    _instance->_lastDisconnectReason = info.wifi_sta_disconnected.reason;
 
-    if (n > 0) {
-        Log::Info(PSTR("WEB: Scan found %d networks."), n);
-        std::vector<std::tuple<String, int, wifi_auth_mode_t>> found_networks;
-        for (int i = 0; i < n; ++i) {
-            found_networks.push_back(std::make_tuple(
-                WiFi.SSID(i),
-                WiFi.RSSI(i),
-                WiFi.encryptionType(i)
-            ));
-        }
-        
-        std::sort(found_networks.begin(), found_networks.end(),
-            [](const auto& a, const auto& b) {
-                return std::get<1>(a) > std::get<1>(b);
-            });
-
-        for (const auto& net : found_networks) {
-            JsonObject netObj = networksArray.add<JsonObject>();
-            netObj["ssid"] = std::get<0>(net);
-            netObj["rssi"] = std::get<1>(net);
-            netObj["encrypted"] = (std::get<2>(net) != WIFI_AUTH_OPEN);
-        }
+    if (_instance->_isConnectingWifi.load()) {
+      int reason = info.wifi_sta_disconnected.reason;
+      if (reason == 15 || reason == 201 || reason == 2 || reason == 8) {
+        Log::Warn(PSTR("WEB: WiFi connection failed with definitive reason: "
+                       "%d. Broadcasting failure."),
+                  reason);
+        _instance->_isConnectingWifi = false;
+        _instance->broadcastWifiStatus("failed", reason);
+      } else {
+        Log::Debug(PSTR("WEB: Transient disconnect during connection attempt "
+                        "(Reason: %d). Waiting for final status."),
+                   reason);
+      }
     } else {
-        Log::Warn(PSTR("WEB: Scan failed or no networks found. Result: %d"), n);
+      _instance->broadcastWifiStatus("disconnected",
+                                     info.wifi_sta_disconnected.reason);
     }
+    break;
 
-    self->broadcastJson(doc);
-    WiFi.scanDelete();
-    
-    self->_isScanningWifi = false;
-    vTaskDelete(NULL);
+  case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+    Serial.printf("Got IP address: %s\n",
+                  IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str());
+    if (_instance) {
+      if (_instance->_isConnectingWifi.load()) {
+        _instance->_isConnectingWifi = false;
+      }
+      _instance->_lastDisconnectReason = 0;
+      _instance->broadcastWifiStatus("connected");
+    }
+    break;
+
+  case ARDUINO_EVENT_WIFI_AP_START:
+    Serial.println("AP started");
+    break;
+
+  case ARDUINO_EVENT_WIFI_AP_STOP:
+    Serial.println("AP stopped");
+    break;
+
+  case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+    Serial.println("Client connected to AP");
+    break;
+
+  case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+    Serial.println("Client disconnected from AP");
+    break;
+  default:
+    break;
+  }
 }
 
-void WebManager::getWifiStatusJson(JsonDocument& doc) {
-    doc["connected"] = WiFi.status() == WL_CONNECTED;
-    if (doc["connected"]) {
-        doc["ssid"] = WiFi.SSID();
-        doc["rssi"] = WiFi.RSSI();
-        doc["ip"] = WiFi.localIP().toString();
-    }
-    doc["scanning"] = _isScanningWifi.load();
-    doc["connecting"] = _isConnectingWifi.load();
-    if (_lastDisconnectReason != 0) {
-        doc["last_disconnect_reason"] = _lastDisconnectReason;
-    }
-}
+void WebManager::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+                           AwsEventType type, void *arg, uint8_t *data,
+                           size_t len) {
+  if (_modeManager)
+    _modeManager->recordWebApiActivity();
+  if (type == WS_EVT_CONNECT) {
+    Log::Debug(PSTR("WEB: WebSocket client #%u connected from %s"),
+               client->id(), client->remoteIP().toString().c_str());
 
-void WebManager::broadcastWifiStatus(const char* status, int reason) {
     JsonDocument doc;
     getWifiStatusJson(doc);
-    
     doc["type"] = "wifi_status_update";
-    doc["status"] = status;
-    if (reason != 0) {
-        doc["reason"] = reason;
+
+    String output;
+    serializeJson(doc, output);
+    client->text(output);
+
+    broadcastOtaStatus();
+  } else if (type == WS_EVT_DISCONNECT) {
+    Log::Debug(PSTR("WEB: WebSocket client #%u disconnected."), client->id());
+  }
+}
+
+void WebManager::wifiScanTask(void *pvParameters) {
+  WebManager *self = static_cast<WebManager *>(pvParameters);
+  Log::Info(PSTR("WEB: Starting WiFi scan..."));
+
+  int n = WiFi.scanNetworks();
+
+  JsonDocument doc;
+  doc["type"] = "scan_result";
+  JsonArray networksArray = doc["networks"].to<JsonArray>();
+
+  if (n > 0) {
+    Log::Info(PSTR("WEB: Scan found %d networks."), n);
+    std::vector<std::tuple<String, int, wifi_auth_mode_t>> found_networks;
+    for (int i = 0; i < n; ++i) {
+      found_networks.push_back(
+          std::make_tuple(WiFi.SSID(i), WiFi.RSSI(i), WiFi.encryptionType(i)));
     }
-    broadcastJson(doc);
+
+    std::sort(found_networks.begin(), found_networks.end(),
+              [](const auto &a, const auto &b) {
+                return std::get<1>(a) > std::get<1>(b);
+              });
+
+    for (const auto &net : found_networks) {
+      JsonObject netObj = networksArray.add<JsonObject>();
+      netObj["ssid"] = std::get<0>(net);
+      netObj["rssi"] = std::get<1>(net);
+      netObj["encrypted"] = (std::get<2>(net) != WIFI_AUTH_OPEN);
+    }
+  } else {
+    Log::Warn(PSTR("WEB: Scan failed or no networks found. Result: %d"), n);
+  }
+
+  self->broadcastJson(doc);
+  WiFi.scanDelete();
+
+  self->_isScanningWifi = false;
+  vTaskDelete(NULL);
+}
+
+void WebManager::getWifiStatusJson(JsonDocument &doc) {
+  doc["connected"] = WiFi.status() == WL_CONNECTED;
+  if (doc["connected"]) {
+    doc["ssid"] = WiFi.SSID();
+    doc["rssi"] = WiFi.RSSI();
+    doc["ip"] = WiFi.localIP().toString();
+  }
+  doc["scanning"] = _isScanningWifi.load();
+  doc["connecting"] = _isConnectingWifi.load();
+  if (_lastDisconnectReason != 0) {
+    doc["last_disconnect_reason"] = _lastDisconnectReason;
+  }
+}
+
+void WebManager::broadcastWifiStatus(const char *status, int reason) {
+  JsonDocument doc;
+  getWifiStatusJson(doc);
+
+  doc["type"] = "wifi_status_update";
+  doc["status"] = status;
+  if (reason != 0) {
+    doc["reason"] = reason;
+  }
+  broadcastJson(doc);
 }
 
 void WebManager::broadcastOtaStatus() {
-    JsonDocument doc;
-    bool isConnected = (WiFi.status() == WL_CONNECTED);
+  JsonDocument doc;
+  bool isConnected = (WiFi.status() == WL_CONNECTED);
 
-    doc["type"] = "ota_status";
-    
-    doc["internet_ok"] = isConnected;
-    doc["current_version"] = _currentFirmwareVersion;
-    doc["latest_version"] = isConnected ? _latestOtaVersion : "N/A";
-    doc["update_available"] = isConnected ? _otaUpdateAvailable : false;
-    
-    doc["changelog"] = isConnected ? _otaChangeLog : "Connect to Wi-Fi to check for updates.";
+  doc["type"] = "ota_status";
 
-    broadcastJson(doc);
+  doc["internet_ok"] = isConnected;
+  doc["current_version"] = _currentFirmwareVersion;
+  doc["latest_version"] = isConnected ? _latestOtaVersion : "N/A";
+  doc["update_available"] = isConnected ? _otaUpdateAvailable : false;
+
+  doc["changelog"] =
+      isConnected ? _otaChangeLog : "Connect to Wi-Fi to check for updates.";
+
+  broadcastJson(doc);
 }
 
 void WebManager::broadcastOtaProgress(int progress) {
-    JsonDocument doc;
-    doc["type"] = "ota_progress";
-    doc["progress"] = progress;
-    broadcastJson(doc);
+  JsonDocument doc;
+  doc["type"] = "ota_progress";
+  doc["progress"] = progress;
+  broadcastJson(doc);
 }
 
-void WebManager::broadcastJson(const JsonDocument& doc) {
-    String output;
-    serializeJson(doc, output);
-    _ws.textAll(output); // Send JSON string to all connected WebSocket clients
+void WebManager::broadcastJson(const JsonDocument &doc) {
+  String output;
+  serializeJson(doc, output);
+  _ws.textAll(output); // Send JSON string to all connected WebSocket clients
 }
 
-void WebManager::otaCheckVersionTask(void* pvParameters) {
-    WebManager* self = static_cast<WebManager*>(pvParameters);
-    self->fetchOtaVersionInfo(); // Fetch version info from server
-    self->broadcastOtaStatus(); // Broadcast status to UI
-    vTaskDelete(NULL); // Delete the task
+void WebManager::otaCheckVersionTask(void *pvParameters) {
+  WebManager *self = static_cast<WebManager *>(pvParameters);
+  self->fetchOtaVersionInfo(); // Fetch version info from server
+  self->broadcastOtaStatus();  // Broadcast status to UI
+  vTaskDelete(NULL);           // Delete the task
 }
 
-void WebManager::otaDownloadTask(void* pvParameters) {
-    WebManager* self = static_cast<WebManager*>(pvParameters);
-    self->downloadAndApplyOta(); // Download and apply OTA
-    vTaskDelete(NULL); // Delete the task
+void WebManager::otaDownloadTask(void *pvParameters) {
+  WebManager *self = static_cast<WebManager *>(pvParameters);
+  self->downloadAndApplyOta(); // Download and apply OTA
+  vTaskDelete(NULL);           // Delete the task
 }
 
 bool WebManager::fetchOtaVersionInfo() {
-    if (WiFi.status() != WL_CONNECTED) return false;
-    HTTPClient http;
-    WiFiClientSecure client;
-    client.setInsecure();
-    
-    http.begin(client, OTA_VERSION_URL);
-    int httpCode = http.GET();
-    
-    if (httpCode == HTTP_CODE_OK) {
-        JsonDocument doc;
-        if (deserializeJson(doc, http.getStream()) == DeserializationError::Ok) {
-            xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
-            _latestOtaVersion = doc["version"].as<String>();
-            _otaChangeLog = doc["changelog"].as<String>();
-            _otaUpdateAvailable = isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
-            xSemaphoreGive(_otaDataMutex);
-            http.end();
-            return true;
-        }
-    }
-    http.end();
+  if (WiFi.status() != WL_CONNECTED)
     return false;
+  HTTPClient http;
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  http.begin(client, OTA_VERSION_URL);
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    JsonDocument doc;
+    if (deserializeJson(doc, http.getStream()) == DeserializationError::Ok) {
+      xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
+      _latestOtaVersion = doc["version"].as<String>();
+      _otaChangeLog = doc["changelog"].as<String>();
+      _otaUpdateAvailable =
+          isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
+      xSemaphoreGive(_otaDataMutex);
+      http.end();
+      return true;
+    }
+  }
+  http.end();
+  return false;
 }
 
 void WebManager::downloadAndApplyOta() {
-    esp_task_wdt_add(NULL);
+  esp_task_wdt_add(NULL);
 
-    JsonDocument doc;
-    doc["type"] = "ota_result";
+  JsonDocument doc;
+  doc["type"] = "ota_result";
 
-    if (WiFi.status() != WL_CONNECTED) {
-        doc["success"] = false;
-        doc["message"] = "OTA Failed: No Internet Connection.";
-    } else {
-        HTTPClient http;
-        WiFiClientSecure client;
-        client.setInsecure();
-        
-        http.begin(client, OTA_FIRMWARE_URL);
-        int httpCode = http.GET();
-        
-        if (httpCode == HTTP_CODE_OK) {
-            int contentLength = http.getSize();
-            if (contentLength > 0 && Update.begin(contentLength)) {
-                Log::Info("OTA: Starting download. Size: %d bytes.", contentLength);
-                WiFiClient *stream = http.getStreamPtr();
-                size_t written = 0;
-                int lastProgress = -1;
-                uint8_t buff[1024] = { 0 };
+  if (WiFi.status() != WL_CONNECTED) {
+    doc["success"] = false;
+    doc["message"] = "OTA Failed: No Internet Connection.";
+  } else {
+    HTTPClient http;
+    WiFiClientSecure client;
+    client.setInsecure();
 
-                while (http.connected() && (written < contentLength)) {
-                    esp_task_wdt_reset();
-                    size_t len = stream->readBytes(buff, sizeof(buff));
-                    if (len > 0) {
-                        Update.write(buff, len);
-                        written += len;
-                        int progress = (int)(((float)written / (float)contentLength) * 100);
-                        if (progress > lastProgress) {
-                            broadcastOtaProgress(progress);
-                            lastProgress = progress;
-                        }
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(1));
-                }
+    http.begin(client, OTA_FIRMWARE_URL);
+    int httpCode = http.GET();
 
-                if (written == contentLength && Update.end(true)) {
-                    _otaUpdateDownloaded = true;
-                    if (_modeManager) _modeManager->setUpdateDownloaded(true);
-                    doc["success"] = true;
-                    doc["message"] = "Download complete! Update will be applied on exit.";
-                    Log::Info("OTA: Download successful.");
-                } else {
-                    doc["success"] = false;
-                    doc["message"] = "Update failed: " + String(Update.errorString());
-                    Update.abort();
-                }
-            } else {
-                doc["success"] = false;
-                doc["message"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
+    if (httpCode == HTTP_CODE_OK) {
+      int contentLength = http.getSize();
+      if (contentLength > 0 && Update.begin(contentLength)) {
+        Log::Info("OTA: Starting download. Size: %d bytes.", contentLength);
+        WiFiClient *stream = http.getStreamPtr();
+        size_t written = 0;
+        int lastProgress = -1;
+        uint8_t buff[1024] = {0};
+
+        while (http.connected() && (written < contentLength)) {
+          esp_task_wdt_reset();
+          size_t len = stream->readBytes(buff, sizeof(buff));
+          if (len > 0) {
+            Update.write(buff, len);
+            written += len;
+            int progress = (int)(((float)written / (float)contentLength) * 100);
+            if (progress > lastProgress) {
+              broadcastOtaProgress(progress);
+              lastProgress = progress;
             }
-        } else {
-            doc["success"] = false;
-            doc["message"] = "Failed to download. HTTP Error: " + String(httpCode);
+          }
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
-        http.end();
+
+        if (written == contentLength && Update.end(true)) {
+          _otaUpdateDownloaded = true;
+          if (_modeManager)
+            _modeManager->setUpdateDownloaded(true);
+          doc["success"] = true;
+          doc["message"] = "Download complete! Update will be applied on exit.";
+          Log::Info("OTA: Download successful.");
+        } else {
+          doc["success"] = false;
+          doc["message"] = "Update failed: " + String(Update.errorString());
+          Update.abort();
+        }
+      } else {
+        doc["success"] = false;
+        doc["message"] = "Not enough space or invalid content length. Error: " +
+                         String(Update.getError());
+      }
+    } else {
+      doc["success"] = false;
+      doc["message"] = "Failed to download. HTTP Error: " + String(httpCode);
     }
-    
-    broadcastJson(doc);
-    esp_task_wdt_delete(NULL);
-    vTaskDelete(NULL);
+    http.end();
+  }
+
+  broadcastJson(doc);
+  esp_task_wdt_delete(NULL);
+  vTaskDelete(NULL);
 }
 
 void WebManager::setupLogBroadcaster() {
-    Log::setWebSocketLogSender([this](const char* level, const String& msg) {
-        if (_isServerRunning.load() && strcmp(level, "TEST") == 0) {
-            JsonDocument doc;
-            doc["type"] = "log";
-            doc["ts"] = millis();
-            doc["msg"] = msg;
+  Log::setWebSocketLogSender([this](const char *level, const String &msg) {
+    if (_isServerRunning.load() && strcmp(level, "TEST") == 0) {
+      JsonDocument doc;
+      doc["type"] = "log";
+      doc["ts"] = millis();
+      doc["msg"] = msg;
 
-            broadcastJson(doc);
-        }
-    });
+      broadcastJson(doc);
+    }
+  });
 }
 
-String WebManager::getPageHeader(const String& title) {
-    String html = F("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>");
-    html += "<title>" + title + "</title>";
-    html += F(R"rawliteral(<style>
+String WebManager::getPageHeader(const String &title) {
+  String html =
+      F("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta "
+        "name='viewport' content='width=device-width, initial-scale=1.0'>");
+  html += "<title>" + title + "</title>";
+  html += F(R"rawliteral(<style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
         body {
@@ -1358,12 +1421,16 @@ String WebManager::getPageHeader(const String& title) {
         }
     </script>
     </head><body><div class='container'><h1>)rawliteral");
-    html += title; html += F("</h1>"); return html;
+  html += title;
+  html += F("</h1>");
+  return html;
 }
 
 String WebManager::getPageFooter(bool showHomeButton) {
-    String html; 
-    if (showHomeButton) html += F("<p style='margin-top:25px;'><a href='/' class='btn'>Back to Home</a></p>");
-    html += F("</div></body></html>"); 
-    return html;
+  String html;
+  if (showHomeButton)
+    html += F("<p style='margin-top:25px;'><a href='/' class='btn'>Back to "
+              "Home</a></p>");
+  html += F("</div></body></html>");
+  return html;
 }
