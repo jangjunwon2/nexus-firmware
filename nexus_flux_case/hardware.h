@@ -3,23 +3,24 @@
 #define HARDWARE_H
 
 #include "config.h"
-#include "utils.h"
 #include <atomic>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 class HardwareManager {
 public:
     HardwareManager();
     void begin();
+    
     ButtonEventType getButtonEvent();
     unsigned long getExecButtonPressedDuration() const;
+    
     void setLedPattern(LedPatternType pattern, int repeatCount = 0);
+    LedPatternType getCurrentLedPattern() const;
     bool isLedPatternActive() const;
     
-    // PWM 제어 방식 (0~100)
-    void setMosfets(uint8_t pwmValue); 
-    
+    void setMosfets(bool on); 
     void shutdownOutputs();
-    LedPatternType getCurrentLedPattern() const;
 
 private:
     static void hardwareTask(void* arg);
@@ -35,15 +36,15 @@ private:
     unsigned long _execButtonPressTimestamp;
     unsigned long _bothButtonsPressTimestamp;
     bool _inBothPressSequence;
-    std::atomic<ButtonEventType> _currentButtonEvent;
     unsigned long _execButtonPressedDuration;
 
+    std::atomic<ButtonEventType> _currentButtonEvent;
     std::atomic<LedPatternType> _currentLedPattern;
+    std::atomic<bool> _mosfetState; 
+
     int _ledTargetBlinkCount;
     unsigned long _ledPatternStartTime;
     bool _ledState;
-    
-    std::atomic<uint8_t> _mosfetPwmValue; 
 };
 
 #endif // HARDWARE_H

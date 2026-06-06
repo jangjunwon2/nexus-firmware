@@ -87,6 +87,7 @@ void ModeManager::handleEspNowCommand(const uint8_t* senderMac, const Comm::Comm
         return;
     }
 
+    // MachineType 필터링 (ALL 이거나 내 타입일 때만)
     if (pkt.targetMachineType != TYPE_ALL && pkt.targetMachineType != MY_MACHINE_TYPE) {
         Log::Debug(PSTR("COMM: Ignored packet for different machine type: %d"), pkt.targetMachineType);
         return; 
@@ -116,6 +117,8 @@ void ModeManager::handleEspNowCommand(const uint8_t* senderMac, const Comm::Comm
             startPlaySequence(pkt.steps, pkt.stepCount, pkt.lastKnownRttUs, pkt.lastKnownRxProcessingTimeUs);
         }
         _commManager->sendAck(senderMac, pkt, rxTime);
+    } else {
+        Log::Warn(PSTR("COMM: Unknown packet type %u received. Ignoring."), pkt.packetType);
     }
 }
 
@@ -138,11 +141,16 @@ void ModeManager::triggerManualRun(uint32_t delayMs, uint32_t playMs) {
         Log::TestLog(PSTR("Manual test: Wait %.1f s, Play %.1f s"), (float)delayMs / 1000.0f, (float)playMs / 1000.0f);
         
         startPlaySequence(&manualStep, 1, 0, 0); 
+    } else {
+        Log::Warn(PSTR("MODE: Manual run requested in unsupported mode: %s"), getModeName(_currentMode));
     }
 }
 
 void ModeManager::startPlaySequence(const ExecutionStep* steps, uint8_t stepCount, uint32_t rttUs, uint32_t rxProcUs) {
-    if (stepCount == 0 || stepCount > MAX_EXECUTION_STEPS) return;
+    if (stepCount == 0 || stepCount > MAX_EXECUTION_STEPS) {
+        Log::Warn(PSTR("MODE: Invalid step count %d received."), stepCount);
+        return;
+    }
 
     _isPlaySequenceActive = true;
     _planStepCount = stepCount;
@@ -155,6 +163,8 @@ void ModeManager::startPlaySequence(const ExecutionStep* steps, uint8_t stepCoun
     _executionPlan[0].delayMinutes = finalAdjustedDelayMs / 60000;
     _executionPlan[0].delaySeconds = (finalAdjustedDelayMs % 60000) / 1000;
 
+    Log::Info(PSTR("MODE: Play sequence started. Total steps: %d. First delay compensated: %ld ms"), _planStepCount, finalAdjustedDelayMs);
+    
     _currentStepIndex = 0;
     startNextStep();
 }
@@ -173,28 +183,32 @@ void ModeManager::startNextStep() {
     _phaseEndTime = currentTime + delayMs;
 
     Log::Info(PSTR("MODE: Starting Step %d/%d (Delay: %lu ms, Play: %lu ms)"), _currentStepIndex + 1, _planStepCount, delayMs, playMs);
+    Log::TestLog(PSTR("Step %d: Wait %.1fs, Play %.1fs"), _currentStepIndex + 1, (float)delayMs / 1000.0f, (float)playMs / 1000.0f);
 
     if (delayMs > 0) {
         _isDelayPhase = true;
-        _hwManager->setMosfets(0);
+        _hwManager->setMosfets(false);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
     } else {
         _isDelayPhase = false;
         _phaseEndTime = currentTime + playMs;
         
-        uint8_t pwm = currentStep.pwmValue;
-        _hwManager->setMosfets(pwm);
-        _hwManager->setLedPattern(pwm > 0 ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
+        bool turnOn = (currentStep.pwmValue > 0);
+        _hwManager->setMosfets(turnOn);
+        _hwManager->setLedPattern(turnOn ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
     }
 }
 
 void ModeManager::stopPlaySequence() {
     if (_isPlaySequenceActive) {
         _isPlaySequenceActive = false;
-        _hwManager->setMosfets(0);
+        _hwManager->setMosfets(false);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
         
         Log::Info(PSTR("MODE: Sequence %lu completed or stopped."), _currentCommandId);
+        if (_currentCommandId != 0) {
+            Log::TestLog(PSTR("Sequence finished."));
+        }
 
         _currentCommandId = 0;
         _planStepCount = 0;
@@ -218,11 +232,12 @@ void ModeManager::updatePlaySequence() {
         uint32_t playMs = (uint32_t)currentStep.playSeconds * 1000;
         _phaseEndTime = currentTime + playMs;
 
-        uint8_t pwm = currentStep.pwmValue;
-        _hwManager->setMosfets(pwm);
-        _hwManager->setLedPattern(pwm > 0 ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
+        bool turnOn = (currentStep.pwmValue > 0);
+        _hwManager->setMosfets(turnOn);
+        _hwManager->setLedPattern(turnOn ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
         
         Log::Info(PSTR("MODE: Step %d Delay -> Play"), _currentStepIndex + 1);
+        Log::TestLog(PSTR("Step %d: Delay finished, now playing."), _currentStepIndex + 1);
     } else {
         Log::Info(PSTR("MODE: Step %d Play finished."), _currentStepIndex + 1);
         _currentStepIndex++;
@@ -250,7 +265,7 @@ void ModeManager::update() {
         case DeviceMode::MODE_WIFI:
         case DeviceMode::MODE_TEST:       updateModeWifi();    break;
         case DeviceMode::MODE_EXIT_WIFI:  updateModeExitWifi(); break;
-        case DeviceMode::MODE_PAIRING:    updateModePairing(); break; 
+        case DeviceMode::MODE_PAIRING:    updateModePairing(); break; // 페어링 타임아웃 처리
         default: break;
     }
 }
@@ -272,8 +287,15 @@ void ModeManager::handleButtonEvent(ButtonEventType event) {
 
     if (_currentMode == DeviceMode::MODE_WIFI || _currentMode == DeviceMode::MODE_TEST) {
         if (event == ButtonEventType::ID_BUTTON_SHORT_PRESS) {
+            Log::Info(PSTR("MODE: Displaying ID in Wi-Fi/Test mode."));
             if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_ID_DISPLAY, _deviceId);
-        } else if (event == ButtonEventType::EXEC_BUTTON_PRESS) {
+            Log::TestLog(PSTR("ID button short pressed. Showing ID %d."), _deviceId);
+        } else if (event == ButtonEventType::ID_BUTTON_LONG_PRESS_END) {
+            Log::Warn(PSTR("MODE: ID setting is disabled in Wi-Fi/Test mode."));
+            Log::TestLog(PSTR("ID button long pressed. ID setting disabled in Test mode."));
+        }
+
+        if (event == ButtonEventType::EXEC_BUTTON_PRESS) {
             if (!_isPlaySequenceActive && !_isManualOperationActive) {
                 startManualOperation();
             }
@@ -292,11 +314,13 @@ void ModeManager::handleButtonEvent(ButtonEventType event) {
         } else if (event == ButtonEventType::ID_BUTTON_LONG_PRESS_END) {
             finalizeIdSelection();
         } else if (event == ButtonEventType::EXEC_BUTTON_PRESS) {
+            // [NEW] ID 설정 모드 대기 상태에서 EXEC 버튼 누르면 페어링 진입
             switchToMode(DeviceMode::MODE_PAIRING);
         }
         return;
     }
 
+    // [NEW] 페어링 모드 중에 아무 버튼이나 누르면 즉시 취소
     if (_currentMode == DeviceMode::MODE_PAIRING) {
         if (event == ButtonEventType::ID_BUTTON_SHORT_PRESS || event == ButtonEventType::EXEC_BUTTON_PRESS) {
             Log::Info(PSTR("MODE: Pairing Cancelled by User."));
@@ -306,7 +330,9 @@ void ModeManager::handleButtonEvent(ButtonEventType event) {
     }
 
     if (_isPlaySequenceActive && event != ButtonEventType::NO_EVENT) {
-        if (millis() - _lastExecButtonActionTime >= 500) {
+        if (millis() - _lastExecButtonActionTime < 500) {
+            Log::Debug(PSTR("MODE: Button press ignored (debounce/cooldown)."));
+        } else {
             Log::Info(PSTR("MODE: Play sequence interrupted by button press."));
             stopPlaySequence();
         }
@@ -315,29 +341,34 @@ void ModeManager::handleButtonEvent(ButtonEventType event) {
     switch (event) {
         case ButtonEventType::ID_BUTTON_SHORT_PRESS:
             switchToMode(DeviceMode::MODE_ID_BLINK);
+            Log::TestLog(PSTR("ID button short pressed. Showing device ID."));
             break;
             
         case ButtonEventType::ID_BUTTON_LONG_PRESS_END:
             _previousDeviceId = _deviceId;
             switchToMode(DeviceMode::MODE_ID_SET);
+            Log::TestLog(PSTR("ID button long pressed. Entering ID setting mode."));
             break;
             
         case ButtonEventType::EXEC_BUTTON_PRESS:
+            // [수정됨] EXEC 버튼 누르면 수동 동작 시작 (시퀀스 재생 안 함)
             if (_currentMode == DeviceMode::MODE_NORMAL) {
                 if (_isPlaySequenceActive) {
                     if (millis() - _lastExecButtonActionTime >= 500) {
+                         Log::Info(PSTR("MODE: Button pressed. Stopping current sequence."));
                          stopPlaySequence();
                     }
                 } else {
                     _lastExecButtonActionTime = millis();
-                    startManualOperation(); 
+                    startManualOperation(); // 버튼을 누를 때 켜기
                 }
             }
             break;
             
         case ButtonEventType::EXEC_BUTTON_RELEASE:
+            // [수정됨] EXEC 버튼 떼면 수동 동작 정지
             if (_currentMode == DeviceMode::MODE_NORMAL) {
-                stopManualOperation(); 
+                stopManualOperation(); // 버튼에서 손을 떼면 끄기
             }
             break;
             
@@ -357,16 +388,19 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             _idSetState = IdSetState::AWAITING_INPUT;
             _idSetLastInputTime = millis();
             if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_ID_SET_ENTER);
+            Log::Info(PSTR("MODE: Entered ID setting mode. Current ID: %d"), _deviceId);
             break;
             
         case DeviceMode::MODE_ID_BLINK:
             if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_ID_DISPLAY, _deviceId);
+            Log::Info(PSTR("MODE: Entered ID blink mode. Displaying ID: %d"), _deviceId);
             break;
             
+        // [NEW] 페어링 모드 시작 시
         case DeviceMode::MODE_PAIRING:
             _pairingStartTime = millis();
-            if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_PAIRING); 
-            if (_commManager) _commManager->setPairingMode(true); 
+            if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_PAIRING); // 빠른 점멸
+            if (_commManager) _commManager->setPairingMode(true); // 통신매니저 가로채기 허가
             Log::Info(PSTR("MODE: Entered Pairing Mode. Press 'SYNC(MAIN)' on Transmitter..."));
             break;
 
@@ -381,6 +415,7 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             
         case DeviceMode::MODE_TEST:
             if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_ON);
+            Log::Info(PSTR("MODE: Entered test mode."));
             break;
             
         case DeviceMode::MODE_EXIT_WIFI:
@@ -398,6 +433,7 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             
         case DeviceMode::MODE_ERROR:
             if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_ERROR);
+            Log::Error(PSTR("MODE: Entered ERROR mode. System halted."));
             break;
             
         default:
@@ -406,15 +442,22 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
 }
 
 void ModeManager::attemptAutoConnection() {
+    Log::Info(PSTR("MODE: Attempting Wi-Fi auto-connection..."));
     String credsJson = Utils::loadWifiCredentials();
-    if (credsJson == "[]") return;
+    if (credsJson == "[]") {
+        Log::Info(PSTR("MODE: No saved Wi-Fi credentials. Skipping auto-connection."));
+        return;
+    }
     
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
     int n = WiFi.scanNetworks();
     
-    if (n == 0) return;
+    if (n == 0) {
+        Log::Warn(PSTR("MODE: No networks found during auto-connect scan."));
+        return;
+    }
     
     JsonDocument doc;
     deserializeJson(doc, credsJson);
@@ -439,7 +482,10 @@ void ModeManager::attemptAutoConnection() {
     WiFi.scanDelete();
     
     if (bestSsid != "") {
+        Log::Info(PSTR("MODE: Found best-match saved network: %s (RSSI: %d). Connecting..."), bestSsid.c_str(), maxRssi);
         WiFi.begin(bestSsid.c_str(), bestPass.c_str());
+    } else {
+        Log::Info(PSTR("MODE: No saved networks found in scan results."));
     }
 }
 
@@ -448,9 +494,14 @@ void ModeManager::exitModeLogic(DeviceMode mode) {
         case DeviceMode::MODE_ID_SET:
             _idSetState = IdSetState::IDLE;
             break;
+            
+        // [NEW] 페어링 모드 해제 시 통신매니저의 플래그 끄기
         case DeviceMode::MODE_PAIRING: 
             if (_commManager) _commManager->setPairingMode(false); 
             break;
+            
+        case DeviceMode::MODE_WIFI:
+        case DeviceMode::MODE_TEST:
         default: break;
     }
 }
@@ -474,10 +525,12 @@ void ModeManager::updateModeIdSet() {
             if (currentTime - _idSetLastInputTime > LED_ID_SET_ENTER_ON_MS) {
                 _idSetState = IdSetState::AWAITING_INPUT;
                 _hwManager->setLedPattern(LedPatternType::LED_OFF);
+                Log::Info(PSTR("MODE: Ready to receive ID input."));
             }
             break;
         case IdSetState::AWAITING_INPUT:
             if (currentTime - _idSetLastInputTime > ID_SET_TIMEOUT_MS) {
+                Log::Info(PSTR("MODE: ID setting mode timed out. Reverting to previous ID: %d"), _previousDeviceId);
                 _deviceId = _previousDeviceId;
                 if (_commManager) _commManager->updateMyDeviceId(_deviceId);
                 _idSetState = IdSetState::IDLE;
@@ -490,14 +543,17 @@ void ModeManager::updateModeIdSet() {
                 _idSetState = IdSetState::CONFIRMING_BLINK;
                 _hwManager->setLedPattern(LedPatternType::LED_OFF);
                 _idSetLastInputTime = currentTime;
+                Log::Info(PSTR("MODE: 1 second solid ON complete, waiting 200ms then starting ID %d blink."), _deviceId);
             }
             break;
         case IdSetState::CONFIRMING_BLINK:
             if (!_idBlinkPatternStarted && (currentTime - _idSetLastInputTime >= LED_ID_BLINK_INTERVAL_MS)) {
                 _hwManager->setLedPattern(LedPatternType::LED_ID_DISPLAY, _deviceId);
                 _idBlinkPatternStarted = true;
+                Log::Debug(PSTR("MODE: ID blinking started (ID: %d)."), _deviceId);
             }
             if (_idBlinkPatternStarted && !_hwManager->isLedPatternActive()) {
+                Log::Info(PSTR("MODE: ID blinking complete. Switching to Normal mode."));
                 _idBlinkPatternStarted = false;
                 switchToMode(DeviceMode::MODE_NORMAL);
             }
@@ -508,6 +564,7 @@ void ModeManager::updateModeIdSet() {
 
 void ModeManager::updateModeWifi() {
     if (millis() - _lastWebApiActivityTime > WIFI_MODE_AUTO_EXIT_MS) {
+        Log::Info(PSTR("MODE: Wi-Fi mode inactive for %d minutes. Exiting."), WIFI_MODE_AUTO_EXIT_MS / 60000);
         exitWifiMode();
     }
 }
@@ -518,12 +575,14 @@ void ModeManager::updateModeExitWifi() {
     }
 }
 
+// [NEW] 페어링 성공 시 통신매니저에서 호출
 void ModeManager::notifyPairingSuccess() {
     Log::Info(PSTR("MODE: Pairing Success Notification Received. Switching to Normal."));
-    if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_BOOT_SUCCESS); 
+    if (_hwManager) _hwManager->setLedPattern(LedPatternType::LED_BOOT_SUCCESS); // 성공의 의미로 1초 켜짐
     switchToMode(DeviceMode::MODE_NORMAL);
 }
 
+// [NEW] 페어링 30초 대기열
 void ModeManager::updateModePairing() {
     if (millis() - _pairingStartTime > 30000) {
         Log::Warn(PSTR("MODE: Pairing timeout. Returning to NORMAL."));
@@ -539,6 +598,9 @@ void ModeManager::incrementTemporaryId() {
     
     _idSetLastInputTime = millis();
     _hwManager->setLedPattern(LedPatternType::LED_ID_SET_INCREMENT);
+    
+    Log::Info(PSTR("MODE: Temporary ID set to %d."), _temporaryId);
+    Log::TestLog(PSTR("Temp ID: %d."), _temporaryId);
 }
 
 void ModeManager::finalizeIdSelection() {
@@ -547,28 +609,52 @@ void ModeManager::finalizeIdSelection() {
     _idSetState = IdSetState::CONFIRMING_ON;
     _idSetLastInputTime = millis();
 
-    uint8_t finalId = (_temporaryId == 0) ? _previousDeviceId : _temporaryId;
+    uint8_t finalId;
+    if (_temporaryId == 0) {
+        finalId = _previousDeviceId;
+        Log::Info(PSTR("MODE: Temporary ID is 0, finalizing with previous ID %d."), finalId);
+    } else {
+        finalId = _temporaryId;
+    }
 
     updateDeviceId(finalId, true);
+
+    Log::Info(PSTR("MODE: ID setting confirmed - ID: %d, starting 1 sec solid ON."), finalId);
     _hwManager->setLedPattern(LedPatternType::LED_ID_SET_CONFIRM);
     _idBlinkPatternStarted = false;
+    Log::TestLog(PSTR("ID confirmed: %d."), finalId);
 }
 
 void ModeManager::updateDeviceId(uint8_t newId, bool saveToNvs) {
-    if (newId < MIN_DEVICE_ID || newId > MAX_DEVICE_ID) return;
+    if (newId < MIN_DEVICE_ID || newId > MAX_DEVICE_ID) {
+        Log::Warn(PSTR("MODE: Attempted to set invalid Device ID: %d. Keeping current ID: %d."), newId, _deviceId);
+        return;
+    }
     
     _deviceId = newId;
-    if (saveToNvs) Utils::saveDeviceId(String(_deviceId));
-    if (_commManager) _commManager->updateMyDeviceId(_deviceId);
+    if (saveToNvs) {
+        Utils::saveDeviceId(String(_deviceId));
+    }
+    
+    if (_commManager) {
+        _commManager->updateMyDeviceId(_deviceId);
+    }
+    
+    Log::Info(PSTR("MODE: Device ID set to %d."), _deviceId);
     
     if (saveToNvs && _hwManager) {
         _hwManager->setLedPattern(LedPatternType::LED_ID_DISPLAY, _deviceId);
+        Log::TestLog(PSTR("ID changed from web: %d"), _deviceId);
     }
 }
 
-void ModeManager::recordWebApiActivity() { _lastWebApiActivityTime = millis(); }
+void ModeManager::recordWebApiActivity() { 
+    _lastWebApiActivityTime = millis();
+}
 
-void ModeManager::exitWifiMode() { switchToMode(DeviceMode::MODE_EXIT_WIFI); }
+void ModeManager::exitWifiMode() { 
+    switchToMode(DeviceMode::MODE_EXIT_WIFI);
+}
 
 const char* ModeManager::getModeName(DeviceMode mode) const {
     switch (mode) {
@@ -579,29 +665,40 @@ const char* ModeManager::getModeName(DeviceMode mode) const {
         case DeviceMode::MODE_WIFI: return "WIFI";
         case DeviceMode::MODE_TEST: return "TEST";
         case DeviceMode::MODE_EXIT_WIFI: return "EXIT_WIFI";
-        case DeviceMode::MODE_PAIRING: return "PAIRING";
+        case DeviceMode::MODE_PAIRING: return "PAIRING"; // [NEW]
         case DeviceMode::MODE_ERROR: return "ERROR";
         default: return "UNKNOWN";
     }
 }
 
-DeviceMode ModeManager::getCurrentMode() const { return _currentMode; }
-const char* ModeManager::getCurrentModeName() const { return getModeName(_currentMode); }
-void ModeManager::setUpdateDownloaded(bool downloaded) { _updateDownloaded = downloaded; }
+DeviceMode ModeManager::getCurrentMode() const { 
+    return _currentMode; 
+}
+
+const char* ModeManager::getCurrentModeName() const { 
+    return getModeName(_currentMode); 
+}
+
+void ModeManager::setUpdateDownloaded(bool downloaded) { 
+    _updateDownloaded = downloaded; 
+}
 
 void ModeManager::startManualOperation() {
     _isManualOperationActive = true;
     if (_hwManager) {
-        _hwManager->setMosfets(100); 
+        _hwManager->setMosfets(true);
         _hwManager->setLedPattern(LedPatternType::LED_ON);
     }
+    Log::TestLog(PSTR("EXEC button pressed. Device operating."));
 }
 
 void ModeManager::stopManualOperation() {
     if (!_isManualOperationActive) return;
     _isManualOperationActive = false;
     if (_hwManager) {
-        _hwManager->setMosfets(0);
+        _hwManager->setMosfets(false);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
     }
+    Log::Info(PSTR("MODE: Manual execution released after %lu ms."), _hwManager->getExecButtonPressedDuration());
+    Log::TestLog(PSTR("EXEC button released. Device stopped."));
 }

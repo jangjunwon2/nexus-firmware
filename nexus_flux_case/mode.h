@@ -84,7 +84,7 @@ private:
     void updateModeIdSet();
     void updateModeWifi();
     void updateModeExitWifi();
-    void updateModePairing(); // [NEW] 페어링 모드 업데이트
+    void updateModePairing(); // [NEW] 페어링 모드 업데이트 루프
     void updatePlaySequence(); 
 
     void startPlaySequence(const ExecutionStep* steps, uint8_t stepCount, uint32_t rttUs, uint32_t rxProcUs);
