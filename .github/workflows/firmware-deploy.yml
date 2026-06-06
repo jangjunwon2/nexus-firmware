@@ -12,22 +12,15 @@ on:
       - "**/*.h"
       - "**/*.cpp"
       - "**/*.c"
-      - "version.txt"
+      - "**/version.txt"
 
 jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.find.outputs.matrix }}
-      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
-      - id: ver
-        run: |
-          VERSION=$(cat version.txt | tr -d '[:space:]')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "버전: $VERSION"
 
       - id: find
         run: |
@@ -49,6 +42,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: |
+          if [ -f "./${{ matrix.device }}/version.txt" ]; then
+            VERSION=$(cat "./${{ matrix.device }}/version.txt" | tr -d '[:space:]')
+          else
+            VERSION=$(cat "./version.txt" | tr -d '[:space:]')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "${{ matrix.device }} 버전: $VERSION"
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
@@ -74,7 +78,7 @@ jobs:
       - name: Compile
         run: |
           SKETCH=$(find ./${{ matrix.device }} -name "*.ino" | head -1)
-          echo "빌드: $SKETCH"
+          echo "빌드: $SKETCH (v${{ steps.ver.outputs.version }})"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             "$SKETCH" \
@@ -85,7 +89,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          VERSION: ${{ needs.discover.outputs.version }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           BIN=$(find ./build -name "*.ino.bin" | head -1)
           FILE_SIZE=$(stat -c%s "$BIN")
@@ -101,8 +105,8 @@ jobs:
             -H "x-upsert: true" \
             --data-binary @"${BIN}")
           echo "HTTP 상태: ${HTTP_STATUS}"
-          echo "응답: $(cat /tmp/upload_response.txt)"
           if [ "${HTTP_STATUS}" -ge 400 ]; then
+            echo "응답: $(cat /tmp/upload_response.txt)"
             exit 1
           fi
 
@@ -114,7 +118,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          VERSION: ${{ needs.discover.outputs.version }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           MSG="${{ github.event.head_commit.message }}"
           curl -sf -X POST \
@@ -138,9 +142,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          VERSION: ${{ needs.discover.outputs.version }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          # 현재 버전 외 이전 릴리스 조회
           OLD=$(curl -s \
             "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${{ matrix.device }}&version=neq.${VERSION}&select=id,storage_path" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
@@ -152,7 +155,6 @@ jobs:
             exit 0
           fi
 
-          # Storage 파일 삭제
           PREFIXES=$(echo "$OLD" | jq '[.[].storage_path]')
           curl -s -X DELETE \
             "${SUPABASE_URL}/storage/v1/object/firmware" \
@@ -161,8 +163,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"prefixes\": ${PREFIXES}}"
 
-          # DB 레코드 삭제
-          IDS=$(echo "$OLD" | jq -r '[.[].id] | join(",")' )
+          IDS=$(echo "$OLD" | jq -r '[.[].id] | join(",")')
           curl -s -X DELETE \
             "${SUPABASE_URL}/rest/v1/firmware_releases?id=in.(${IDS})" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
