@@ -87,7 +87,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           VERSION: ${{ needs.discover.outputs.version }}
         run: |
-          BIN=$(find ./build -name "*.bin" ! -name "*.bootloader.bin" ! -name "*.partitions.bin" | head -1)
+          BIN=$(find ./build -name "*.ino.bin" | head -1)
           FILE_SIZE=$(stat -c%s "$BIN")
           STORAGE_PATH="${{ matrix.device }}/${VERSION}/firmware-v${VERSION}.bin"
           PUBLIC_URL="${SUPABASE_URL}/storage/v1/object/public/firmware/${STORAGE_PATH}"
