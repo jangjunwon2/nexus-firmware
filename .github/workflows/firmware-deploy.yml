@@ -32,7 +32,7 @@ jobs:
               | xargs -I{} dirname {} \
               | sed 's|^\./||' \
               | sort -u \
-              | jq -R . | jq -sc .)
+              | jq -Rc . | jq -sc .)
           else
             # push 이벤트: 변경된 장치 폴더만 빌드
             CHANGED_DIRS=$(git diff --name-only HEAD~1 HEAD \
@@ -43,7 +43,7 @@ jobs:
             DEVICES="[]"
             for DIR in $CHANGED_DIRS; do
               if [ -d "./$DIR" ] && find "./$DIR" -name "*.ino" | grep -q .; then
-                DEVICES=$(echo "$DEVICES" | jq --arg d "$DIR" '. + [$d]')
+                DEVICES=$(echo "$DEVICES" | jq -c --arg d "$DIR" '. + [$d]')
               fi
             done
           fi
