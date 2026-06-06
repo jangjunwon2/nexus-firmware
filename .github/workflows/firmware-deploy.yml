@@ -5,6 +5,11 @@ env:
 
 on:
   workflow_dispatch:
+    inputs:
+      device:
+        description: '빌드할 장치 이름 (비워두면 전체 빌드)'
+        required: false
+        default: ''
   push:
     branches: [main]
     paths:
@@ -28,12 +33,18 @@ jobs:
       - id: find
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # 수동 실행: 모든 장치 빌드
-            DEVICES=$(find . -name "*.ino" -not -path "*/.git/*" \
-              | xargs -I{} dirname {} \
-              | sed 's|^\./||' \
-              | sort -u \
-              | jq -Rc . | jq -sc .)
+            DEVICE_INPUT="${{ github.event.inputs.device }}"
+            if [ -n "$DEVICE_INPUT" ]; then
+              # 특정 장치만 빌드
+              DEVICES=$(jq -nc --arg d "$DEVICE_INPUT" '[$d]')
+            else
+              # 전체 빌드
+              DEVICES=$(find . -name "*.ino" -not -path "*/.git/*" \
+                | xargs -I{} dirname {} \
+                | sed 's|^\./||' \
+                | sort -u \
+                | jq -Rc . | jq -sc .)
+            fi
           else
             # push 이벤트: push에 포함된 전체 변경 파일 기준으로 장치 감지
             BEFORE="${{ github.event.before }}"
