@@ -146,34 +146,39 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           VERSION: ${{ steps.ver.outputs.version }}
+          DOWNLOAD_URL: ${{ steps.upload.outputs.public_url }}
+          STORAGE_PATH: ${{ steps.upload.outputs.storage_path }}
+          FILE_SIZE: ${{ steps.upload.outputs.file_size }}
         run: |
+          DEVICE="${{ matrix.device }}"
+
           # 동일 장치+버전 기존 항목 먼저 제거 (중복 방지)
           curl -s -X DELETE \
-            "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${{ matrix.device }}&version=eq.${VERSION}" \
+            "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${DEVICE}&version=eq.${VERSION}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}"
 
-          MSG="${{ github.event.head_commit.message }}"
+          # jq로 JSON 안전하게 빌드 (특수문자·한글 이슈 방지)
+          PAYLOAD=$(jq -n \
+            --arg dt  "$DEVICE" \
+            --arg ver "$VERSION" \
+            --arg url "$DOWNLOAD_URL" \
+            --arg sp  "$STORAGE_PATH" \
+            --argjson fs "${FILE_SIZE:-0}" \
+            '{device_type:$dt, version:$ver, download_url:$url, storage_path:$sp, file_size:$fs, is_active:true}')
+
           HTTP=$(curl -s -o /tmp/reg_resp.txt -w "%{http_code}" -X POST \
             "${SUPABASE_URL}/rest/v1/firmware_releases" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"device_type\": \"${{ matrix.device }}\",
-              \"version\": \"${VERSION}\",
-              \"download_url\": \"${{ steps.upload.outputs.public_url }}\",
-              \"storage_path\": \"${{ steps.upload.outputs.storage_path }}\",
-              \"file_size\": ${{ steps.upload.outputs.file_size }},
-              \"is_active\": true,
-              \"notes\": \"v${VERSION}: ${MSG}\"
-            }")
+            -d "$PAYLOAD")
           echo "DB 등록 HTTP: ${HTTP}"
           if [ "${HTTP}" -ge 400 ]; then
             echo "오류: $(cat /tmp/reg_resp.txt)"
             exit 1
           fi
-          echo "✅ ${{ matrix.device }} v${VERSION} 완료"
+          echo "✅ ${DEVICE} v${VERSION} 완료"
 
       - name: Delete old releases
         env:
