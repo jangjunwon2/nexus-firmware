@@ -1002,6 +1002,7 @@ bool WebManager::fetchOtaVersionInfo() {
     int httpCode = http.GET();
     
     if (httpCode == HTTP_CODE_OK) {
+        JsonDocument doc;
         String body = http.getString();
         JsonDocument doc;
         if (deserializeJson(doc, body) == DeserializationError::Ok) {
