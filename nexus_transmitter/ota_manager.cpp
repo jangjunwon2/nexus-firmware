@@ -222,7 +222,8 @@ void checkFirmwareVersion() {
         
         if (!error) {
             otaState.latestVersion = doc["version"].as<String>();
-            otaState.changeLog = doc["changelog"].as<String>();
+            otaState.changeLog = doc["notes"].as<String>();
+            otaState.firmwareUrl = doc["url"].as<String>();
             otaState.updateAvailable = (otaState.latestVersion != firmwareVersion);
             currentMode = MODE_UPDATE_PAGE;
             updateDisplay();
@@ -243,13 +244,19 @@ void checkFirmwareVersion() {
 
 void performOtaUpdate() {
     if (otaState.inProgress) return;
+    if (otaState.firmwareUrl.isEmpty()) {
+        otaErrorMessage = "No firmware URL. Check version first.";
+        currentMode = MODE_OTA_ERROR;
+        updateDisplay();
+        return;
+    }
     otaState.inProgress = true;
     otaState.downloadProgress = 0;
     logPrintf(LogLevel::LOG_INFO, "OTA: Starting firmware update...");
     HTTPClient http;
     WiFiClientSecure client;
     client.setInsecure();
-    http.begin(client, OTA_FIRMWARE_URL);
+    http.begin(client, otaState.firmwareUrl);
     int httpCode = http.GET();
     if (httpCode == HTTP_CODE_OK) {
         int contentLength = http.getSize();

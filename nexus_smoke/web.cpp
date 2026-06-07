@@ -26,7 +26,7 @@ WebManager::WebManager() :
     _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
     _isServerRunning(false), _otaUpdateDownloaded(false), 
     _isScanningWifi(false), _isConnectingWifi(false),
-    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaUpdateAvailable(false),
+    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaFirmwareUrl(""), _otaUpdateAvailable(false),
     _wifiEventId(0), _lastDisconnectReason(0), _wifiConnectStartMillis(0),
     _disconnectedForTestSsid(""), _reconnectOnExitTest(false)
 {
@@ -1003,11 +1003,14 @@ bool WebManager::fetchOtaVersionInfo() {
     
     if (httpCode == HTTP_CODE_OK) {
         JsonDocument doc;
-        if (deserializeJson(doc, http.getStream()) == DeserializationError::Ok) {
+        String body = http.getString();
+        JsonDocument doc;
+        if (deserializeJson(doc, body) == DeserializationError::Ok) {
             xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
             _latestOtaVersion = doc["version"].as<String>();
-            _otaChangeLog = doc["changelog"].as<String>();
-            _otaUpdateAvailable = isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
+            _otaChangeLog = doc["notes"].as<String>();
+            _otaFirmwareUrl = doc["url"].as<String>();
+            _otaUpdateAvailable = !_latestOtaVersion.isEmpty() && _latestOtaVersion != "N/A" && _latestOtaVersion != _currentFirmwareVersion;
             xSemaphoreGive(_otaDataMutex);
             http.end();
             return true;
@@ -1027,11 +1030,22 @@ void WebManager::downloadAndApplyOta() {
         doc["success"] = false;
         doc["message"] = "OTA Failed: No Internet Connection.";
     } else {
+        xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
+        String firmwareUrl = _otaFirmwareUrl;
+        xSemaphoreGive(_otaDataMutex);
+        if (firmwareUrl.isEmpty()) {
+            doc["success"] = false;
+            doc["message"] = "OTA Failed: No firmware URL. Check version first.";
+            broadcastJson(doc);
+            esp_task_wdt_delete(NULL);
+            return;
+        }
+
         HTTPClient http;
         WiFiClientSecure client;
         client.setInsecure();
-        
-        http.begin(client, OTA_FIRMWARE_URL);
+
+        http.begin(client, firmwareUrl);
         int httpCode = http.GET();
         
         if (httpCode == HTTP_CODE_OK) {

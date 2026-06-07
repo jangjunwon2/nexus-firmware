@@ -79,8 +79,7 @@ const int TEXT_X = 10;
 #define MAX_KNOWN_NETWORKS      5
 static const uint8_t broadcastAddress[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-#define OTA_VERSION_URL "https://example.com/api/version" 
-#define OTA_FIRMWARE_URL "https://example.com/api/firmware"
+#define OTA_VERSION_URL "https://mystic-lab.vercel.app/api/admin/firmware/version?device=nexus_transmitter"
 
 enum class LogLevel { LOG_DEBUG = 0, LOG_INFO, LOG_WARN, LOG_ERROR };
 enum ErrorCode { ERROR_NONE = 0, ERROR_INIT_FAILED, ERROR_INVALID_SETTINGS, ERROR_EXECUTION_FAILED };
@@ -174,6 +173,7 @@ struct OtaState {
     String errorMessage;
     String latestVersion;
     String changeLog;
+    String firmwareUrl;
     int scrollOffset = 0;
     bool updateConfirmed = false;
 };
