@@ -44,8 +44,7 @@ constexpr const char* AP_PASSWORD = "";
 constexpr unsigned long WIFI_MODE_AUTO_EXIT_MS = (5 * 60 * 1000);
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 
-constexpr const char* OTA_VERSION_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/version.json";
-constexpr const char* OTA_FIRMWARE_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/firmware.bin";
+constexpr const char* OTA_VERSION_URL = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_receiver";
 constexpr unsigned long OTA_HTTP_TIMEOUT_MS = 10000;
 constexpr uint32_t DEFAULT_TEST_DELAY_MS = 0;
 constexpr uint32_t DEFAULT_TEST_PLAY_MS = 1000;

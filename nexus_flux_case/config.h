@@ -36,15 +36,13 @@ constexpr uint8_t MIN_EXECUTION_STEPS = 1;
 constexpr uint8_t ESP_NOW_CHANNEL = 1;
 static const uint8_t BROADCAST_ADDRESS[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-constexpr const char* AP_SSID = "Nexus_Smoke";
+constexpr const char* AP_SSID = "Nexus_Flux_Case";
 constexpr const char* AP_PASSWORD = "";
 #define AP_IP IPAddress(192, 168, 4, 1)
 constexpr unsigned long WIFI_MODE_AUTO_EXIT_MS = (5 * 60 * 1000);
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 
-// [복구] OTA 및 테스트 관련 상수
-constexpr const char* OTA_VERSION_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/version.json";
-constexpr const char* OTA_FIRMWARE_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/firmware.bin";
+constexpr const char* OTA_VERSION_URL = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_flux_case";
 constexpr unsigned long OTA_HTTP_TIMEOUT_MS = 10000;
 constexpr uint32_t DEFAULT_TEST_DELAY_MS = 0;
 constexpr uint32_t DEFAULT_TEST_PLAY_MS = 1000;
