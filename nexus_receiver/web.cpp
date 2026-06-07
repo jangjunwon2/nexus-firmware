@@ -1010,7 +1010,7 @@ bool WebManager::fetchOtaVersionInfo() {
             _latestOtaVersion = doc["version"].as<String>();
             _otaChangeLog = doc["notes"].as<String>();
             _otaFirmwareUrl = doc["url"].as<String>();
-            _otaUpdateAvailable = isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
+            _otaUpdateAvailable = !_latestOtaVersion.isEmpty() && _latestOtaVersion != "N/A" && _latestOtaVersion != _currentFirmwareVersion;
             xSemaphoreGive(_otaDataMutex);
             return true;
         }
