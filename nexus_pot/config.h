@@ -1,7 +1,6 @@
 /**
  * @file config.h
  * @brief 모든 프로젝트 상수 및 설정을 위한 중앙 설정 파일입니다.
- * @version 1.1.0
  */
 #pragma once
 #ifndef CONFIG_H
@@ -12,7 +11,7 @@
 #include "espnow_comm_shared.h"
 
 // --- 펌웨어 버전 ---
-constexpr const char* FIRMWARE_VERSION = "1.1";
+constexpr const char* FIRMWARE_VERSION = "1.0";
 
 // --- 디버깅 ---
 constexpr bool DEBUG_MODE = true;

@@ -24,8 +24,8 @@ WebManager* WebManager::_instance = nullptr;
 
 WebManager::WebManager() :
     _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
-    _isServerRunning(false), _otaUpdateDownloaded(false), 
-    _isScanningWifi(false), _isConnectingWifi(false),
+    _isServerRunning(false), _otaUpdateDownloaded(false),
+    _isScanningWifi(false), _isConnectingWifi(false), _isCheckingOta(false),
     _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaFirmwareUrl(""), _otaUpdateAvailable(false),
     _wifiEventId(0), _lastDisconnectReason(0), _wifiConnectStartMillis(0),
     _disconnectedForTestSsid(""), _reconnectOnExitTest(false)
@@ -739,7 +739,11 @@ void WebManager::handleWifiStatusApi(AsyncWebServerRequest* request) {
 }
 
 void WebManager::handleCheckOtaApi(AsyncWebServerRequest* request) {
-    xTaskCreate(otaCheckVersionTask, "otaCheckTask", 4096, this, 5, NULL); // Create task to check for OTA updates
+    if (_isCheckingOta.exchange(true)) {
+        request->send(200, "application/json", "{\"status\":\"already_checking\"}");
+        return;
+    }
+    xTaskCreate(otaCheckVersionTask, "otaCheckTask", 8192, this, 5, NULL);
     request->send(200, "application/json", "{\"status\":\"checking\"}");
 }
 
@@ -986,9 +990,10 @@ void WebManager::broadcastJson(const JsonDocument& doc) {
 
 void WebManager::otaCheckVersionTask(void* pvParameters) {
     WebManager* self = static_cast<WebManager*>(pvParameters);
-    self->fetchOtaVersionInfo(); // Fetch version info from server
-    self->broadcastOtaStatus(); // Broadcast status to UI
-    vTaskDelete(NULL); // Delete the task
+    self->fetchOtaVersionInfo();
+    self->broadcastOtaStatus();
+    self->_isCheckingOta = false;
+    vTaskDelete(NULL);
 }
 
 void WebManager::otaDownloadTask(void* pvParameters) {
@@ -998,26 +1003,38 @@ void WebManager::otaDownloadTask(void* pvParameters) {
 }
 
 bool WebManager::fetchOtaVersionInfo() {
-    if (WiFi.status() != WL_CONNECTED) return false;
+    if (WiFi.status() != WL_CONNECTED) {
+        Log::Warn(PSTR("OTA: Wi-Fi not connected. Skipping version check."));
+        return false;
+    }
+    Log::Info(PSTR("OTA: Checking for updates at: %s"), OTA_VERSION_URL);
     HTTPClient http;
     WiFiClientSecure client;
     client.setInsecure();
-    
+    client.setTimeout(15); // seconds
+
+    http.setTimeout(OTA_HTTP_TIMEOUT_MS);
     http.begin(client, OTA_VERSION_URL);
     int httpCode = http.GET();
-    
+    Log::Info(PSTR("OTA: Version check HTTP code: %d"), httpCode);
+
     if (httpCode == HTTP_CODE_OK) {
+        String body = http.getString();
         JsonDocument doc;
-        if (deserializeJson(doc, http.getStream()) == DeserializationError::Ok) {
+        if (deserializeJson(doc, body) == DeserializationError::Ok) {
             xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
             _latestOtaVersion = doc["version"].as<String>();
             _otaChangeLog = doc["notes"].as<String>();
             _otaFirmwareUrl = doc["url"].as<String>();
             _otaUpdateAvailable = isVersionNewer(_latestOtaVersion, _currentFirmwareVersion);
             xSemaphoreGive(_otaDataMutex);
+            Log::Info(PSTR("OTA: Latest version: %s, Update available: %d"), _latestOtaVersion.c_str(), _otaUpdateAvailable);
             http.end();
             return true;
         }
+        Log::Warn(PSTR("OTA: JSON parse failed. Body: %s"), body.c_str());
+    } else {
+        Log::Warn(PSTR("OTA: Version check failed. HTTP code: %d"), httpCode);
     }
     http.end();
     return false;

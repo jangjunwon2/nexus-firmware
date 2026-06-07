@@ -39,6 +39,7 @@ private:
     std::atomic<bool> _otaUpdateDownloaded;
     std::atomic<bool> _isScanningWifi;
     std::atomic<bool> _isConnectingWifi;
+    std::atomic<bool> _isCheckingOta;
     
     String _currentFirmwareVersion;
     String _latestOtaVersion;
