@@ -7,7 +7,7 @@
 #include "config.h"
 #include "utils.h"
 #include <WiFi.h>
-#include <atomic> 
+#include <atomic>
 
 class ModeManager;
 class CommManager;
@@ -16,7 +16,7 @@ class WebManager {
 public:
     WebManager();
     void begin(ModeManager* modeMgr, CommManager* commMgr);
-    
+
     void startServer();
     void stopServer();
     bool isServerRunning() const;
@@ -40,7 +40,7 @@ private:
     std::atomic<bool> _isScanningWifi;
     std::atomic<bool> _isConnectingWifi;
     std::atomic<bool> _isCheckingOta;
-    
+
     String _currentFirmwareVersion;
     String _latestOtaVersion;
     String _otaChangeLog;
@@ -79,7 +79,7 @@ private:
     void handleRunTestApi(AsyncWebServerRequest* request);
 
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len);
-    
+
     static void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
 
     static void wifiScanTask(void* pvParameters);
@@ -94,7 +94,7 @@ private:
     void broadcastOtaStatus();
     void broadcastOtaProgress(int progress);
     void broadcastJson(const JsonDocument& doc);
-    
+
     String getPageHeader(const String& title);
     String getPageFooter(bool showHomeButton);
 

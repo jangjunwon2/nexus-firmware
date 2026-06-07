@@ -119,7 +119,7 @@ jobs:
           SKETCH=$(find ./${{ matrix.device }} -name "*.ino" | head -1)
           echo "빌드: $SKETCH (v${{ steps.ver.outputs.version }})"
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32s3 \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" \
             "$SKETCH" \
             --output-dir ./build
 
