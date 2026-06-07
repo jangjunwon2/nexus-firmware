@@ -43,6 +43,7 @@ private:
     String _currentFirmwareVersion;
     String _latestOtaVersion;
     String _otaChangeLog;
+    String _otaFirmwareUrl;
     bool _otaUpdateAvailable;
 
     wifi_event_id_t _wifiEventId;

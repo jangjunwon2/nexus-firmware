@@ -59,8 +59,7 @@ constexpr unsigned long WIFI_MODE_AUTO_EXIT_MS = (5 * 60 * 1000);
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000; 
 
 // --- OTA 업데이트 URL ---
-constexpr const char* OTA_VERSION_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/version.json";
-constexpr const char* OTA_FIRMWARE_URL = "https://raw.githubusercontent.com/jangjunwon2/update/master/firmware.bin";
+constexpr const char* OTA_VERSION_URL = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_pot";
 constexpr unsigned long OTA_HTTP_TIMEOUT_MS = 10000;
 
 // --- 테스트 모드 설정 ---
