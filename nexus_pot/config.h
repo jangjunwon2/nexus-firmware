@@ -1,7 +1,7 @@
 /**
  * @file config.h
  * @brief 모든 프로젝트 상수 및 설정을 위한 중앙 설정 파일입니다.
- * @version 1.4.0
+ * @version 1.1.0
  */
 #pragma once
 #ifndef CONFIG_H
