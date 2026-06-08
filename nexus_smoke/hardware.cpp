@@ -23,12 +23,14 @@ void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     
-    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN_1, LOW);
     pinMode(MOSFET_PIN_1, OUTPUT);
+    digitalWrite(MOSFET_PIN_2, LOW);
     pinMode(MOSFET_PIN_2, OUTPUT);
-    
+    pinMode(LED_PIN, OUTPUT);
+
     setLed(false);
-    setMosfets(false);
+    _mosfetState = false;
     
     xTaskCreatePinnedToCore(
         hardwareTask,

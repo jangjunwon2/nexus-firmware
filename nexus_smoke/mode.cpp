@@ -420,6 +420,11 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             
         case DeviceMode::MODE_EXIT_WIFI:
             if (_webManager && _webManager->isServerRunning() && _updateDownloaded) {
+                // 재부팅 전 정리 — 생략 시 새 펌웨어 첫 부팅에서 먹통 발생
+                if (_webManager) _webManager->stopServer();
+                WiFi.softAPdisconnect(true);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                if (_hwManager) _hwManager->shutdownOutputs();
                 applyUpdateAndReboot();
                 return;
             }
