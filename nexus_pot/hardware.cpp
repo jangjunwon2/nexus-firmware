@@ -26,6 +26,7 @@ void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     
+    digitalWrite(LED_PIN, LOW);
     pinMode(LED_PIN, OUTPUT);
 
     ledcAttach(MOSFET_PIN_1, PWM_FREQ, PWM_RESOLUTION);

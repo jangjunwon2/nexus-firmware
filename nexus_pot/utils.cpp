@@ -1,5 +1,6 @@
 #include "utils.h"
 #include <ArduinoJson.h>
+#include <nvs_flash.h>
 
 Log::WsLogSender Log::_wsLogSender = nullptr;
 SemaphoreHandle_t Log::_logMutex = NULL;
@@ -18,7 +19,13 @@ namespace Utils {
 
     static Preferences preferences;
 
-    bool initNvs() { return preferences.begin(PREFS_NAMESPACE, false); }
+    bool initNvs() {
+        if (preferences.begin(PREFS_NAMESPACE, false)) return true;
+        // NVS 손상 시 초기화 후 재시도
+        nvs_flash_erase();
+        nvs_flash_init();
+        return preferences.begin(PREFS_NAMESPACE, false);
+    }
 
     String loadWifiCredentials() { return preferences.getString(KEY_WIFI_CREDS, "[]"); }
 

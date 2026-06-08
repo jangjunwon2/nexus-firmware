@@ -420,6 +420,12 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             
         case DeviceMode::MODE_EXIT_WIFI:
             if (_webManager && _webManager->isServerRunning() && _updateDownloaded) {
+                if (_webManager) _webManager->stopServer();
+                WiFi.softAPdisconnect(true);
+                WiFi.disconnect(true);
+                WiFi.mode(WIFI_OFF);
+                vTaskDelay(pdMS_TO_TICKS(300));
+                if (_hwManager) _hwManager->shutdownOutputs();
                 applyUpdateAndReboot();
                 return;
             }
