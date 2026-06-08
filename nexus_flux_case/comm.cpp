@@ -200,11 +200,10 @@ void CommManager::channelHoppingTask(void* param) {
                 continue;
             }
         } else {
-            // WIFI 또는 다른 모드일 때는 기본 채널로 설정 고정
-            if (self->_currentHopChannel != ESP_NOW_CHANNEL) {
-                self->_currentHopChannel = ESP_NOW_CHANNEL;
-                esp_wifi_set_channel(ESP_NOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
-            }
+            // WIFI/TEST 모드 등에서는 채널을 건드리지 않음
+            // softAP가 동작 중일 때 esp_wifi_set_channel()을 호출하면 AP 비콘이 중단됨
+            // 채널 복구는 exitWifi 시 reinitForEspNow()가 처리함
+            self->_currentHopChannel = ESP_NOW_CHANNEL;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }

@@ -26,7 +26,8 @@ void HardwareManager::begin() {
     pinMode(LED_PIN, OUTPUT);
     pinMode(MOSFET_PIN_1, OUTPUT);
     pinMode(MOSFET_PIN_2, OUTPUT);
-    
+    pinMode(BOOST_EN_PIN, OUTPUT);
+
     setLed(false);
     setMosfets(false);
     
@@ -228,8 +229,17 @@ void HardwareManager::setLed(bool on) {
 void HardwareManager::setMosfets(bool on) {
     if (_mosfetState.load() != on) {
         _mosfetState = on;
-        digitalWrite(MOSFET_PIN_1, on);
-        digitalWrite(MOSFET_PIN_2, on);
+
+        if (on) {
+            digitalWrite(BOOST_EN_PIN, HIGH);
+            delay(10);
+            digitalWrite(MOSFET_PIN_1, HIGH);
+            digitalWrite(MOSFET_PIN_2, HIGH);
+        } else {
+            digitalWrite(MOSFET_PIN_1, LOW);
+            digitalWrite(MOSFET_PIN_2, LOW);
+            digitalWrite(BOOST_EN_PIN, LOW);
+        }
     }
 }
 

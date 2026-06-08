@@ -171,7 +171,7 @@ void WebManager::handleRoot(AsyncWebServerRequest* request) {
     // [FIX] 테스트 모드에서 복귀 시 WiFi 재연결을 위해 이 라인을 다시 추가합니다.
     reconnectWifiIfNeeded();
     
-    String html = getPageHeader("Nexus Smoke");
+    String html = getPageHeader("Nexus Flux Case");
     html += "<div class='card'><h3>Wi-Fi Status</h3><p id='home-wifi-status'>Loading...</p></div>";
     html += "<div class='card'><h3>Device Control</h3>"
             "<p><a href='/wifi' class='btn'>Wi-Fi Settings</a></p>"

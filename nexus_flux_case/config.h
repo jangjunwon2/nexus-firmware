@@ -6,14 +6,15 @@
 #include <IPAddress.h>
 #include "espnow_comm_shared.h"
 
-constexpr const char* FIRMWARE_VERSION = "1.0.0"; 
+constexpr const char* FIRMWARE_VERSION = "1.1.0"; 
 constexpr bool DEBUG_MODE = true;
 constexpr uint32_t WDT_TIMEOUT_S = 30;
 
-constexpr uint8_t ID_BUTTON_PIN = 4;
-constexpr uint8_t EXEC_BUTTON_PIN = 2;
+constexpr uint8_t ID_BUTTON_PIN = 2;
+constexpr uint8_t EXEC_BUTTON_PIN = 5;
 constexpr uint8_t MOSFET_PIN_1 = 7;
-constexpr uint8_t MOSFET_PIN_2 = 8;
+constexpr uint8_t MOSFET_PIN_2 = 10;
+constexpr uint8_t BOOST_EN_PIN = 8;
 constexpr uint8_t LED_PIN = 48;
 
 constexpr unsigned long DEBOUNCE_DELAY_MS = 50;
@@ -52,7 +53,7 @@ enum MachineType : uint8_t {
 };
 
 // 장치 타입 설정
-constexpr MachineType MY_MACHINE_TYPE = TYPE_SMOKE;
+constexpr MachineType MY_MACHINE_TYPE = TYPE_MAGNET;
 
 
 

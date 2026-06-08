@@ -1,6 +1,9 @@
 #include "hardware.h"
 #include "utils.h"
 
+constexpr double PWM_FREQ = 5000.0;
+constexpr uint8_t PWM_RESOLUTION = 8;
+
 HardwareManager::HardwareManager() :
     _idButtonState(false),
     _execButtonState(false),
@@ -10,10 +13,10 @@ HardwareManager::HardwareManager() :
     _execButtonPressTimestamp(0),
     _bothButtonsPressTimestamp(0),
     _inBothPressSequence(false),
-    _execButtonPressedDuration(0), // 순서 맞춤
+    _execButtonPressedDuration(0),
     _currentButtonEvent(ButtonEventType::NO_EVENT),
     _currentLedPattern(LedPatternType::LED_OFF),
-    _mosfetState(false), // 순서 맞춤
+    _mosfetPwmValue(0),
     _ledTargetBlinkCount(0),
     _ledPatternStartTime(0),
     _ledState(false)
@@ -24,11 +27,12 @@ void HardwareManager::begin() {
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     
     pinMode(LED_PIN, OUTPUT);
-    pinMode(MOSFET_PIN_1, OUTPUT);
-    pinMode(MOSFET_PIN_2, OUTPUT);
-    
+
+    ledcAttach(MOSFET_PIN_1, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(MOSFET_PIN_2, PWM_FREQ, PWM_RESOLUTION);
+
     setLed(false);
-    setMosfets(false);
+    setMosfets(0);
     
     xTaskCreatePinnedToCore(
         hardwareTask,
@@ -225,16 +229,20 @@ void HardwareManager::setLed(bool on) {
     }
 }
 
-void HardwareManager::setMosfets(bool on) {
-    if (_mosfetState.load() != on) {
-        _mosfetState = on;
-        digitalWrite(MOSFET_PIN_1, on);
-        digitalWrite(MOSFET_PIN_2, on);
+void HardwareManager::setMosfets(uint8_t pwmValue) {
+    int dutyCycle = map(pwmValue, 0, 100, 0, 255);
+    if (dutyCycle < 0) dutyCycle = 0;
+    if (dutyCycle > 255) dutyCycle = 255;
+
+    if (_mosfetPwmValue.load() != pwmValue) {
+        _mosfetPwmValue = pwmValue;
+        ledcWrite(MOSFET_PIN_1, dutyCycle);
+        ledcWrite(MOSFET_PIN_2, dutyCycle);
     }
 }
 
 void HardwareManager::shutdownOutputs() {
-    setMosfets(false);
+    setMosfets(0);
     setLed(false);
 }
 

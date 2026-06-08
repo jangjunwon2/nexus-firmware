@@ -187,22 +187,22 @@ void ModeManager::startNextStep() {
 
     if (delayMs > 0) {
         _isDelayPhase = true;
-        _hwManager->setMosfets(false);
+        _hwManager->setMosfets(0);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
     } else {
         _isDelayPhase = false;
         _phaseEndTime = currentTime + playMs;
-        
-        bool turnOn = (currentStep.pwmValue > 0);
-        _hwManager->setMosfets(turnOn);
-        _hwManager->setLedPattern(turnOn ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
+
+        uint8_t pwm = currentStep.pwmValue;
+        _hwManager->setMosfets(pwm);
+        _hwManager->setLedPattern(pwm > 0 ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
     }
 }
 
 void ModeManager::stopPlaySequence() {
     if (_isPlaySequenceActive) {
         _isPlaySequenceActive = false;
-        _hwManager->setMosfets(false);
+        _hwManager->setMosfets(0);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
         
         Log::Info(PSTR("MODE: Sequence %lu completed or stopped."), _currentCommandId);
@@ -232,9 +232,9 @@ void ModeManager::updatePlaySequence() {
         uint32_t playMs = (uint32_t)currentStep.playSeconds * 1000;
         _phaseEndTime = currentTime + playMs;
 
-        bool turnOn = (currentStep.pwmValue > 0);
-        _hwManager->setMosfets(turnOn);
-        _hwManager->setLedPattern(turnOn ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
+        uint8_t pwm = currentStep.pwmValue;
+        _hwManager->setMosfets(pwm);
+        _hwManager->setLedPattern(pwm > 0 ? LedPatternType::LED_ON : LedPatternType::LED_OFF);
         
         Log::Info(PSTR("MODE: Step %d Delay -> Play"), _currentStepIndex + 1);
         Log::TestLog(PSTR("Step %d: Delay finished, now playing."), _currentStepIndex + 1);
@@ -686,7 +686,7 @@ void ModeManager::setUpdateDownloaded(bool downloaded) {
 void ModeManager::startManualOperation() {
     _isManualOperationActive = true;
     if (_hwManager) {
-        _hwManager->setMosfets(true);
+        _hwManager->setMosfets(100);
         _hwManager->setLedPattern(LedPatternType::LED_ON);
     }
     Log::TestLog(PSTR("EXEC button pressed. Device operating."));
@@ -696,7 +696,7 @@ void ModeManager::stopManualOperation() {
     if (!_isManualOperationActive) return;
     _isManualOperationActive = false;
     if (_hwManager) {
-        _hwManager->setMosfets(false);
+        _hwManager->setMosfets(0);
         _hwManager->setLedPattern(LedPatternType::LED_OFF);
     }
     Log::Info(PSTR("MODE: Manual execution released after %lu ms."), _hwManager->getExecButtonPressedDuration());

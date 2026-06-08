@@ -19,7 +19,7 @@ public:
     LedPatternType getCurrentLedPattern() const;
     bool isLedPatternActive() const;
     
-    void setMosfets(bool on); 
+    void setMosfets(uint8_t pwmValue);
     void shutdownOutputs();
 
 private:
@@ -40,7 +40,7 @@ private:
 
     std::atomic<ButtonEventType> _currentButtonEvent;
     std::atomic<LedPatternType> _currentLedPattern;
-    std::atomic<bool> _mosfetState; 
+    std::atomic<uint8_t> _mosfetPwmValue;
 
     int _ledTargetBlinkCount;
     unsigned long _ledPatternStartTime;
