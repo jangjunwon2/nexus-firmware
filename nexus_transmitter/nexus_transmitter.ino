@@ -28,7 +28,7 @@ void setup() {
     }
 
     Serial.println("\n\n[INFO] SYSTEM: Transmitter Device Booting...");
-    logPrintf(LogLevel::LOG_INFO, "Current Firmware Version: %s", firmwareVersion.c_str());
+    logPrintf(LogLevel::LOG_INFO, "Firmware v%s | %s", firmwareVersion.c_str(), firmwareNotes.c_str());
     
     if (!initHardware()) {
         logPrintf(LogLevel::LOG_ERROR, "SYSTEM: Hardware Initialization Failed! Entering Error Mode.");

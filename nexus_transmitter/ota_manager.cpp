@@ -260,18 +260,19 @@ void performOtaUpdate() {
     int httpCode = http.GET();
     if (httpCode == HTTP_CODE_OK) {
         int contentLength = http.getSize();
-        if (contentLength > 0) {
-            if (!Update.begin(contentLength)) {
-                otaErrorMessage = "Not enough space";
-                currentMode = MODE_OTA_ERROR;
-                otaState.inProgress = false;
-                http.end();
-                return;
-            }
+        size_t updateSize = (contentLength > 0) ? (size_t)contentLength : UPDATE_SIZE_UNKNOWN;
+        if (!Update.begin(updateSize)) {
+            otaErrorMessage = "Not enough space";
+            currentMode = MODE_OTA_ERROR;
+            otaState.inProgress = false;
+            http.end();
+            return;
+        }
+        {
             WiFiClient *stream = http.getStreamPtr();
             size_t written = 0;
             uint8_t buff[128] = {0};
-            while (http.connected() && (written < contentLength)) {
+            while (http.connected() && (contentLength <= 0 || written < (size_t)contentLength)) {
                 size_t size = stream->available();
                 if (size) {
                     size_t read = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
@@ -283,12 +284,14 @@ void performOtaUpdate() {
                         return;
                     }
                     written += read;
-                    otaState.downloadProgress = (written * 100) / contentLength;
-                    updateDisplay();
+                    if (contentLength > 0) {
+                        otaState.downloadProgress = (written * 100) / (size_t)contentLength;
+                        updateDisplay();
+                    }
                 }
                 delay(1);
             }
-            if (Update.end()) {
+            if (Update.end(true)) {
                 logPrintf(LogLevel::LOG_INFO, "OTA: Update complete, rebooting...");
                 delay(1000);
                 ESP.restart();
@@ -296,9 +299,6 @@ void performOtaUpdate() {
                 otaErrorMessage = "Update failed";
                 currentMode = MODE_OTA_ERROR;
             }
-        } else {
-            otaErrorMessage = "Invalid file size";
-            currentMode = MODE_OTA_ERROR;
         }
     } else {
         otaErrorMessage = "Download failed";
@@ -559,10 +559,11 @@ void setupWebServer() {
     
     server.on("/api/version", HTTP_GET, [](AsyncWebServerRequest *request){
         logPrintf(LogLevel::LOG_INFO, "WebAPI: /api/version requested. Starting synchronous version check.");
-        checkFirmwareVersion(); 
+        checkFirmwareVersion();
         JsonDocument doc;
         doc["current"] = firmwareVersion;
-        doc["latest"] = otaState.latestVersion;
+        doc["notes"]   = firmwareNotes;
+        doc["latest"]  = otaState.latestVersion;
         String responseStr;
         serializeJson(doc, responseStr);
         request->send(200, "application/json", responseStr);

@@ -38,7 +38,8 @@ bool           oledInitialized = false;
 bool           espNowInitialized = false;
 
 // 펌웨어 및 Wi-Fi 정보
-const String firmwareVersion = "1.0.0"; // 현재 펌웨어 버전
+const String firmwareVersion = FIRMWARE_VERSION;
+const String firmwareNotes   = FIRMWARE_NOTES;
 String wifi_ssid = "";
 String wifi_password = "";
 String otaErrorMessage = "";
