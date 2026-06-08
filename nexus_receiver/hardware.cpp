@@ -24,11 +24,12 @@ HardwareManager::HardwareManager() :
 void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
+    digitalWrite(LED_PIN, LOW);
     pinMode(LED_PIN, OUTPUT);
-    
+
     // [NEW] 승압 회로 핀 초기화
-    pinMode(BOOST_EN_PIN, OUTPUT);
     digitalWrite(BOOST_EN_PIN, LOW);
+    pinMode(BOOST_EN_PIN, OUTPUT);
     
     ledcAttach(MOSFET_PIN_1, PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(MOSFET_PIN_2, PWM_FREQ, PWM_RESOLUTION);
@@ -214,11 +215,12 @@ void HardwareManager::setMosfets(uint8_t pwmValue) {
         // [NEW] 모스펫을 작동시킬 때(pwmValue > 0) Boost 회로도 함께 켭니다.
         if (pwmValue > 0) {
             digitalWrite(BOOST_EN_PIN, HIGH);
+            vTaskDelay(pdMS_TO_TICKS(10));
         } else {
             digitalWrite(BOOST_EN_PIN, LOW);
         }
 
-        ledcWrite(MOSFET_PIN_1, dutyCycle); 
+        ledcWrite(MOSFET_PIN_1, dutyCycle);
         ledcWrite(MOSFET_PIN_2, dutyCycle);
         
         Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d) / Boost EN: %s"), pwmValue, dutyCycle, pwmValue > 0 ? "ON" : "OFF"); 

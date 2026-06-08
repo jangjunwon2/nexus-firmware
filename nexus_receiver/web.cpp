@@ -126,6 +126,9 @@ bool WebManager::isServerRunning() const { return _isServerRunning.load(); }
 void WebManager::performUpdateAndReboot() {
     if (_otaUpdateDownloaded.load()) {
         Log::Info(PSTR("WEB: Applying OTA update and rebooting..."));
+        // USB CDC를 명시적으로 분리해야 소프트 리셋 후 재열거가 정상 동작함
+        Serial.end();
+        delay(200);
         ESP.restart();
     }
 }
@@ -1027,7 +1030,7 @@ void WebManager::downloadAndApplyOta() {
 
     if (WiFi.status() != WL_CONNECTED) {
         doc["success"] = false;
-        doc["message"] = "OTA Failed: No Internet Connection.";
+        doc["msg"] = "OTA Failed: No Internet Connection.";
     } else {
         xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
         String firmwareUrl = _otaFirmwareUrl;
@@ -1035,7 +1038,7 @@ void WebManager::downloadAndApplyOta() {
 
         if (firmwareUrl.isEmpty()) {
             doc["success"] = false;
-            doc["message"] = "OTA Failed: No firmware URL. Check version first.";
+            doc["msg"] = "OTA Failed: No firmware URL. Check version first.";
             broadcastJson(doc);
             esp_task_wdt_delete(NULL);
             return;
@@ -1047,49 +1050,52 @@ void WebManager::downloadAndApplyOta() {
 
         http.begin(client, firmwareUrl);
         int httpCode = http.GET();
-        
+
         if (httpCode == HTTP_CODE_OK) {
             int contentLength = http.getSize();
-            if (contentLength > 0 && Update.begin(contentLength)) {
+            size_t updateSize = (contentLength > 0) ? (size_t)contentLength : UPDATE_SIZE_UNKNOWN;
+            if (Update.begin(updateSize)) {
                 Log::Info("OTA: Starting download. Size: %d bytes.", contentLength);
                 WiFiClient *stream = http.getStreamPtr();
                 size_t written = 0;
                 int lastProgress = -1;
                 uint8_t buff[1024] = { 0 };
 
-                while (http.connected() && (written < contentLength)) {
+                while (http.connected() && (contentLength <= 0 || written < (size_t)contentLength)) {
                     esp_task_wdt_reset();
                     size_t len = stream->readBytes(buff, sizeof(buff));
                     if (len > 0) {
                         Update.write(buff, len);
                         written += len;
-                        int progress = (int)(((float)written / (float)contentLength) * 100);
-                        if (progress > lastProgress) {
-                            broadcastOtaProgress(progress);
-                            lastProgress = progress;
+                        if (contentLength > 0) {
+                            int progress = (int)(((float)written / (float)contentLength) * 100);
+                            if (progress > lastProgress) {
+                                broadcastOtaProgress(progress);
+                                lastProgress = progress;
+                            }
                         }
                     }
                     vTaskDelay(pdMS_TO_TICKS(1));
                 }
 
-                if (written == contentLength && Update.end(true)) {
+                if ((contentLength <= 0 || written == (size_t)contentLength) && Update.end(true)) {
                     _otaUpdateDownloaded = true;
                     if (_modeManager) _modeManager->setUpdateDownloaded(true);
                     doc["success"] = true;
-                    doc["message"] = "Download complete! Update will be applied on exit.";
+                    doc["msg"] = "Download complete! Update will be applied on exit.";
                     Log::Info("OTA: Download successful.");
                 } else {
                     doc["success"] = false;
-                    doc["message"] = "Update failed: " + String(Update.errorString());
+                    doc["msg"] = "Update failed: " + String(Update.errorString());
                     Update.abort();
                 }
             } else {
                 doc["success"] = false;
-                doc["message"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
+                doc["msg"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
             }
         } else {
             doc["success"] = false;
-            doc["message"] = "Failed to download. HTTP Error: " + String(httpCode);
+            doc["msg"] = "Failed to download. HTTP Error: " + String(httpCode);
         }
         http.end();
     }
