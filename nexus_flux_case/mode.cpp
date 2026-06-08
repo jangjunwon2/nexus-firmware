@@ -409,7 +409,8 @@ void ModeManager::enterModeLogic(DeviceMode mode) {
             if (_hwManager) _hwManager->shutdownOutputs();
             _hwManager->setLedPattern(LedPatternType::LED_WIFI_MODE_TOGGLE);
             _lastWebApiActivityTime = millis();
-            attemptAutoConnection(); 
+            if (_commManager) _commManager->prepareForWifiMode();
+            attemptAutoConnection();
             if (_webManager) _webManager->startServer();
             break;
             

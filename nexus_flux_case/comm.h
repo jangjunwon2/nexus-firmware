@@ -24,6 +24,7 @@ public:
     
     void sendAck(const uint8_t* targetMac, const Comm::CommPacket& originalPacket, uint32_t rx_time);
     void reinitForEspNow();
+    void prepareForWifiMode();
     uint8_t getChannel() const;
 
     void setPairingMode(bool isPairing);

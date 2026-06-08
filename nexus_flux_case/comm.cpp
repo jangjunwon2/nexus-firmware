@@ -70,6 +70,12 @@ void CommManager::registerMasterMac(const uint8_t* mac) {
     }
 }
 
+void CommManager::prepareForWifiMode() {
+    esp_now_deinit();
+    _currentHopChannel = ESP_NOW_CHANNEL;
+    Log::Info(PSTR("COMM: ESP-NOW deinitialized for WiFi AP mode."));
+}
+
 void CommManager::reinitForEspNow() {
     Log::Info(PSTR("COMM: Reinitializing ESP-NOW..."));
     if (WiFi.isConnected()) {

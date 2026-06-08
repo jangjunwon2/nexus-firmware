@@ -72,9 +72,20 @@ void WebManager::startServer() {
     Log::Info(PSTR("WEB: Starting web server..."));
     uint8_t channel = _commManager->getChannel();
     WiFi.mode(WIFI_AP_STA);
+    delay(200);
     IPAddress apIP(AP_IP);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    WiFi.softAP(AP_SSID, AP_PASSWORD, channel, 0, 4);
+    bool apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, channel, 0, 4);
+    if (!apStarted) {
+        Log::Error(PSTR("WEB: softAP failed on first attempt. Retrying with WiFi reset..."));
+        WiFi.mode(WIFI_OFF);
+        delay(300);
+        WiFi.mode(WIFI_AP_STA);
+        delay(200);
+        WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+        WiFi.softAP(AP_SSID, AP_PASSWORD, channel, 0, 4);
+    }
+    delay(100);
     _wifiEventId = WiFi.onEvent(WebManager::onWiFiEvent);
     _server.begin();
     _isServerRunning = true;
