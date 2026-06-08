@@ -6,7 +6,7 @@
 #include <IPAddress.h>
 #include "espnow_comm_shared.h"
 
-constexpr const char* FIRMWARE_VERSION = "1.1";
+constexpr const char* FIRMWARE_VERSION = "1.0";
 constexpr bool DEBUG_MODE = true;
 constexpr uint32_t WDT_TIMEOUT_S = 30;
 
