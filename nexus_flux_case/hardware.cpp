@@ -23,13 +23,17 @@ void HardwareManager::begin() {
     pinMode(ID_BUTTON_PIN, INPUT_PULLUP);
     pinMode(EXEC_BUTTON_PIN, INPUT_PULLUP);
     
-    pinMode(LED_PIN, OUTPUT);
-    pinMode(MOSFET_PIN_1, OUTPUT);
-    pinMode(MOSFET_PIN_2, OUTPUT);
+    // 출력 핀은 반드시 LOW 설정 후 OUTPUT 전환 - 소프트 리셋 시 GPIO 래치가 이전 상태를 유지할 수 있음
+    digitalWrite(BOOST_EN_PIN, LOW);
     pinMode(BOOST_EN_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN_1, LOW);
+    pinMode(MOSFET_PIN_1, OUTPUT);
+    digitalWrite(MOSFET_PIN_2, LOW);
+    pinMode(MOSFET_PIN_2, OUTPUT);
+    pinMode(LED_PIN, OUTPUT);
 
     setLed(false);
-    setMosfets(false);
+    _mosfetState = false;
     
     xTaskCreatePinnedToCore(
         hardwareTask,
