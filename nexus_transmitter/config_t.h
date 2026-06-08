@@ -3,6 +3,11 @@
 #ifndef CONFIG_T_H
 #define CONFIG_T_H
 
+// ── 펌웨어 버전 ──────────────────────────────────────────────────────────────
+constexpr const char* FIRMWARE_VERSION = "1.1";
+constexpr const char* FIRMWARE_NOTES   = "Initial release";
+// ─────────────────────────────────────────────────────────────────────────────
+
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <Wire.h>
@@ -79,8 +84,6 @@ const int TEXT_X = 10;
 #define MAX_KNOWN_NETWORKS      5
 static const uint8_t broadcastAddress[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-constexpr const char* FIRMWARE_VERSION = "1.1";
-constexpr const char* FIRMWARE_NOTES   = "Initial release";
 constexpr const char* OTA_VERSION_URL  = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_transmitter";
 
 enum class LogLevel { LOG_DEBUG = 0, LOG_INFO, LOG_WARN, LOG_ERROR };
