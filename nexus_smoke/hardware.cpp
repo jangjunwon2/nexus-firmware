@@ -27,6 +27,7 @@ void HardwareManager::begin() {
     pinMode(MOSFET_PIN_1, OUTPUT);
     digitalWrite(MOSFET_PIN_2, LOW);
     pinMode(MOSFET_PIN_2, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
     pinMode(LED_PIN, OUTPUT);
 
     setLed(false);

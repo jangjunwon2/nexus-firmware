@@ -126,6 +126,9 @@ bool WebManager::isServerRunning() const { return _isServerRunning.load(); }
 void WebManager::performUpdateAndReboot() {
     if (_otaUpdateDownloaded.load()) {
         Log::Info(PSTR("WEB: Applying OTA update and rebooting..."));
+        // USB CDC를 명시적으로 분리해야 소프트 리셋 후 재열거가 정상 동작함
+        Serial.end();
+        delay(200);
         ESP.restart();
     }
 }
