@@ -70,6 +70,9 @@ namespace Utils {
     // [NEW] 송신기 MAC 주소 저장/불러오기
     void saveMasterMac(const uint8_t* mac);
     bool loadMasterMac(uint8_t* mac);
+
+    uint32_t loadTimedRunMs();
+    void saveTimedRunMs(uint32_t ms);
 }
 
 constexpr size_t JSON_DOC_SIZE_WS_LOG = 384;

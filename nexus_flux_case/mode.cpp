@@ -26,7 +26,9 @@ ModeManager::ModeManager(HardwareManager* hwManager, CommManager* commManager, W
       _updateDownloaded(false),
       _idBlinkPatternStarted(false),
       _previousDeviceId(DEFAULT_DEVICE_ID),
-      _pairingStartTime(0)
+      _pairingStartTime(0),
+      _timedRunDurationMs(DEFAULT_TIMED_RUN_MS),
+      _lastRemoteTestPlayMs(0)
 {
     _modeSwitchMutex = xSemaphoreCreateMutex();
     memset(_executionPlan, 0, sizeof(_executionPlan));
@@ -39,7 +41,9 @@ void ModeManager::begin() {
     }
 
     _deviceId = Utils::loadDeviceId().toInt();
-    
+    _timedRunDurationMs = Utils::loadTimedRunMs();
+    Log::Info(PSTR("MODE: Timed run duration loaded: %lu ms."), _timedRunDurationMs);
+
     if (_deviceId < MIN_DEVICE_ID || _deviceId > MAX_DEVICE_ID) {
         Log::Warn(PSTR("MODE: Invalid device ID %d loaded from NVS. Resetting to default ID %d."), _deviceId, DEFAULT_DEVICE_ID);
         _deviceId = DEFAULT_DEVICE_ID;
@@ -114,6 +118,19 @@ void ModeManager::handleEspNowCommand(const uint8_t* senderMac, const Comm::Comm
             Log::Info(PSTR("MODE: New command (Type: %d) received. Steps: %d"), pkt.targetMachineType, pkt.stepCount);
             
             Utils::saveLastSequence(pkt.steps, pkt.stepCount);
+
+            // 리모컨 명령의 총 play 시간을 타이머 기준 시간으로 저장
+            uint32_t totalPlayMs = 0;
+            for (uint8_t i = 0; i < pkt.stepCount; i++) {
+                totalPlayMs += (uint32_t)pkt.steps[i].playSeconds * 1000;
+            }
+            if (totalPlayMs > 0) {
+                _timedRunDurationMs = totalPlayMs;
+                _lastRemoteTestPlayMs = totalPlayMs;
+                Utils::saveTimedRunMs(totalPlayMs);
+                Log::Info(PSTR("MODE: Timed run duration updated to %lu ms via remote."), totalPlayMs);
+            }
+
             startPlaySequence(pkt.steps, pkt.stepCount, pkt.lastKnownRttUs, pkt.lastKnownRxProcessingTimeUs);
         }
         _commManager->sendAck(senderMac, pkt, rxTime);
@@ -136,6 +153,14 @@ void ModeManager::triggerManualRun(uint32_t delayMs, uint32_t playMs) {
         manualStep.pwmValue = 100;
 
         Utils::saveLastSequence(&manualStep, 1);
+
+        // 테스트 모드 play 시간을 타이머 기준 시간으로 저장
+        if (playMs > 0) {
+            _timedRunDurationMs = playMs;
+            _lastRemoteTestPlayMs = playMs;
+            Utils::saveTimedRunMs(playMs);
+            Log::Info(PSTR("MODE: Timed run duration updated to %lu ms via test mode."), playMs);
+        }
 
         Log::Info(PSTR("MODE: Manual test run started. Delay: %u ms, Play: %u ms."), delayMs, playMs);
         Log::TestLog(PSTR("Manual test: Wait %.1f s, Play %.1f s"), (float)delayMs / 1000.0f, (float)playMs / 1000.0f);
@@ -351,25 +376,31 @@ void ModeManager::handleButtonEvent(ButtonEventType event) {
             break;
             
         case ButtonEventType::EXEC_BUTTON_PRESS:
-            // [수정됨] EXEC 버튼 누르면 수동 동작 시작 (시퀀스 재생 안 함)
+            // 플럭스 케이스: 1회 누르면 _timedRunDurationMs 동안 동작 후 자동 정지 (hold 방식 아님)
             if (_currentMode == DeviceMode::MODE_NORMAL) {
                 if (_isPlaySequenceActive) {
                     if (millis() - _lastExecButtonActionTime >= 500) {
-                         Log::Info(PSTR("MODE: Button pressed. Stopping current sequence."));
-                         stopPlaySequence();
+                        Log::Info(PSTR("MODE: Button pressed. Stopping current sequence."));
+                        stopPlaySequence();
                     }
                 } else {
                     _lastExecButtonActionTime = millis();
-                    startManualOperation(); // 버튼을 누를 때 켜기
+                    ExecutionStep timedStep;
+                    memset(&timedStep, 0, sizeof(timedStep));
+                    uint32_t playS = _timedRunDurationMs / 1000;
+                    if (playS == 0) playS = 1;
+                    if (playS > 255) playS = 255;
+                    timedStep.playSeconds = (uint8_t)playS;
+                    timedStep.pwmValue = 100;
+                    Log::Info(PSTR("MODE: Timed run started: %lu ms (%u s)."), _timedRunDurationMs, timedStep.playSeconds);
+                    Log::TestLog(PSTR("EXEC: Timed run %u s."), timedStep.playSeconds);
+                    startPlaySequence(&timedStep, 1, 0, 0);
                 }
             }
             break;
-            
+
         case ButtonEventType::EXEC_BUTTON_RELEASE:
-            // [수정됨] EXEC 버튼 떼면 수동 동작 정지
-            if (_currentMode == DeviceMode::MODE_NORMAL) {
-                stopManualOperation(); // 버튼에서 손을 떼면 끄기
-            }
+            // 플럭스 케이스: 버튼 릴리즈 시 동작 중단 없음 (타이머가 자동 정지)
             break;
             
         default: break;

@@ -125,6 +125,15 @@ namespace Utils {
         return true;
     }
 
+    uint32_t loadTimedRunMs() {
+        return preferences.getUInt("timed_run_ms", DEFAULT_TIMED_RUN_MS);
+    }
+
+    void saveTimedRunMs(uint32_t ms) {
+        preferences.putUInt("timed_run_ms", ms);
+        Log::Info(PSTR("NVS: Saved timed run duration: %lu ms"), ms);
+    }
+
     // [NEW] 송신기 MAC 저장 함수
     void saveMasterMac(const uint8_t* mac) {
         preferences.putBytes(KEY_MASTER_MAC, mac, 6);

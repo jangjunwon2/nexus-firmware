@@ -73,7 +73,10 @@ private:
     uint8_t _previousDeviceId;
     
     // [NEW] 페어링 대기열 타임아웃용 타이머
-    unsigned long _pairingStartTime; 
+    unsigned long _pairingStartTime;
+
+    uint32_t _timedRunDurationMs;   // EXEC 버튼 1회 누를 시 동작 시간 (ms)
+    uint32_t _lastRemoteTestPlayMs; // 리모컨/테스트에서 마지막 설정된 play 시간 (ms)
 
     void enterModeLogic(DeviceMode mode);
     void exitModeLogic(DeviceMode mode);
