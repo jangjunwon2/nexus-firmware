@@ -79,7 +79,7 @@ const int TEXT_X = 10;
 #define MAX_KNOWN_NETWORKS      5
 static const uint8_t broadcastAddress[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-constexpr const char* FIRMWARE_VERSION = "1.0.0";
+constexpr const char* FIRMWARE_VERSION = "1.1";
 constexpr const char* FIRMWARE_NOTES   = "Initial release";
 constexpr const char* OTA_VERSION_URL  = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_transmitter";
 
