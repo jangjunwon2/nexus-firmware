@@ -4,11 +4,11 @@
 #include <algorithm>
 #include <esp_mac.h>
 
-void espNowSendCb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+void espNowSendCb(const esp_now_send_info_t *info, esp_now_send_status_t status) {
     lastEspNowTxTime = millis();
 }
 
-void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     // [NEW] 복제 수신 대기 모드일 때 가로채기
     if (currentMode == MODE_CLONE_RX && len == sizeof(Comm::ClonePacket)) {
         const Comm::ClonePacket* clonePkt = (const Comm::ClonePacket*)data;
@@ -63,7 +63,7 @@ bool initEspNow() {
     delay(50);
     if (esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE) != ESP_OK) return false;
     if (esp_now_init() != ESP_OK) return false;
-    esp_now_register_send_cb(espNowSendCb);
+    esp_now_register_send_cb(reinterpret_cast<esp_now_send_cb_t>(espNowSendCb));
     esp_now_register_recv_cb(OnDataRecv);
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, broadcastAddress, 6);
