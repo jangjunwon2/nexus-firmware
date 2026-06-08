@@ -10,8 +10,8 @@ extern bool executionComplete;
 extern unsigned long lastEspNowTxTime; 
 
 bool initEspNow();
-void espNowSendCb(const esp_now_send_info_t *info, esp_now_send_status_t status);
-void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len);
+void espNowSendCb(const uint8_t *mac_addr, esp_now_send_status_t status);
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len);
 bool manageCommunication();
 bool sendExecutionCommand(Comm::PacketType type, RunningDevice& device, uint32_t& out_tx_timestamp);
 void deinitEspNow();
