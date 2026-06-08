@@ -12,12 +12,18 @@ WebManager webManager;
 ModeManager modeManager(&hwManager, &commManager, &webManager);
 
 void setup() {
+    // [진단] setup() 진입 확인 — 빠른 5회 블링크 (시리얼 없이 실행 여부 판별)
+    pinMode(LED_PIN, OUTPUT);
+    for (int i = 0; i < 5; i++) {
+        digitalWrite(LED_PIN, HIGH); delay(60);
+        digitalWrite(LED_PIN, LOW);  delay(60);
+    }
+
     // 절대 최우선: Serial.begin 포함 어떤 단계에서 멈춰도 WDT가 자동 재시작
     enableWatchdog(WDT_TIMEOUT_S);
 
-    // LED 핀을 즉시 LOW로 고정 (부트 직후 약발광 방지)
+    // LED 핀을 LOW로 고정 (약발광 방지)
     digitalWrite(LED_PIN, LOW);
-    pinMode(LED_PIN, OUTPUT);
 
     Serial.begin(115200);
     delay(100);
