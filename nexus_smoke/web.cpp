@@ -1049,14 +1049,15 @@ void WebManager::downloadAndApplyOta() {
         
         if (httpCode == HTTP_CODE_OK) {
             int contentLength = http.getSize();
-            if (contentLength > 0 && Update.begin(contentLength)) {
+            size_t updateSize = (contentLength > 0) ? (size_t)contentLength : UPDATE_SIZE_UNKNOWN;
+            if (Update.begin(updateSize)) {
                 Log::Info("OTA: Starting download. Size: %d bytes.", contentLength);
                 WiFiClient *stream = http.getStreamPtr();
                 size_t written = 0;
                 int lastProgress = -1;
                 uint8_t buff[1024] = { 0 };
 
-                while (http.connected() && (written < contentLength)) {
+                while (http.connected() && (contentLength <= 0 || written < (size_t)contentLength)) {
                     esp_task_wdt_reset();
                     size_t len = stream->readBytes(buff, sizeof(buff));
                     if (len > 0) {
@@ -1071,24 +1072,24 @@ void WebManager::downloadAndApplyOta() {
                     vTaskDelay(pdMS_TO_TICKS(1));
                 }
 
-                if (written == contentLength && Update.end(true)) {
+                if ((contentLength <= 0 || written == (size_t)contentLength) && Update.end(true)) {
                     _otaUpdateDownloaded = true;
                     if (_modeManager) _modeManager->setUpdateDownloaded(true);
                     doc["success"] = true;
-                    doc["message"] = "Download complete! Update will be applied on exit.";
+                    doc["msg"] = "Download complete! Update will be applied on exit.";
                     Log::Info("OTA: Download successful.");
                 } else {
                     doc["success"] = false;
-                    doc["message"] = "Update failed: " + String(Update.errorString());
+                    doc["msg"] = "Update failed: " + String(Update.errorString());
                     Update.abort();
                 }
             } else {
                 doc["success"] = false;
-                doc["message"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
+                doc["msg"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
             }
         } else {
             doc["success"] = false;
-            doc["message"] = "Failed to download. HTTP Error: " + String(httpCode);
+            doc["msg"] = "Failed to download. HTTP Error: " + String(httpCode);
         }
         http.end();
     }
