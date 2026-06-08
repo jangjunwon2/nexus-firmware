@@ -6,7 +6,7 @@
 #include <IPAddress.h>
 #include "espnow_comm_shared.h"
 
-constexpr const char* FIRMWARE_VERSION = "1.1.0"; 
+constexpr const char* FIRMWARE_VERSION = "1.0";
 constexpr bool DEBUG_MODE = true;
 constexpr uint32_t WDT_TIMEOUT_S = 30;
 
@@ -43,7 +43,7 @@ constexpr unsigned long WIFI_MODE_AUTO_EXIT_MS = (5 * 60 * 1000);
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 
 // [복구] OTA 및 테스트 관련 상수
-constexpr const char* OTA_VERSION_URL = "https://mystic-lab.vercel.app/api/admin/firmware/version?device=nexus_smoke";
+constexpr const char* OTA_VERSION_URL = "https://mystic-lab.vercel.app/api/firmware/latest?device=nexus_smoke";
 constexpr unsigned long OTA_HTTP_TIMEOUT_MS = 10000;
 constexpr uint32_t DEFAULT_TEST_DELAY_MS = 0;
 constexpr uint32_t DEFAULT_TEST_PLAY_MS = 1000;
