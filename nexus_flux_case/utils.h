@@ -30,9 +30,10 @@ private:
 };
 
 inline void enableWatchdog(uint32_t timeoutS = WDT_TIMEOUT_S) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
     esp_task_wdt_config_t wdt_config = {
         .timeout_ms = timeoutS * 1000,
-        .idle_core_mask = (1 << 0) | (1 << 1),
+        .idle_core_mask = 0, // IDLE 태스크 감시를 비활성화하여 리셋 루프 방지
         .trigger_panic = true,
     };
     
@@ -48,6 +49,15 @@ inline void enableWatchdog(uint32_t timeoutS = WDT_TIMEOUT_S) {
     if (esp_task_wdt_add(NULL) != ESP_OK) {
         ets_printf("ERROR: Failed to add loop task to WDT\n");
     }
+#else
+    esp_err_t init_result = esp_task_wdt_init(timeoutS, true);
+    if (init_result != ESP_OK && init_result != ESP_ERR_INVALID_STATE) {
+        ets_printf("ERROR: Failed to init WDT: %s\n", esp_err_to_name(init_result));
+    }
+    if (esp_task_wdt_add(NULL) != ESP_OK) {
+        ets_printf("ERROR: Failed to add loop task to WDT\n");
+    }
+#endif
 }
 
 namespace Utils {
