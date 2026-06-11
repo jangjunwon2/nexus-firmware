@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <esp_mac.h>
 
+volatile bool cloneReceivedFlag = false;
+volatile uint8_t clonedMacBuffer[6] = {};
+
 void espNowSendCb(const esp_now_send_info_t *info, esp_now_send_status_t status) {
     lastEspNowTxTime = millis();
 }
@@ -15,15 +18,13 @@ void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
         if (memcmp(clonePkt->signature, Comm::kSig, 4) == 0 && clonePkt->packetType == Comm::CLONE_MAC_ANNOUNCE) {
             uint8_t calc_crc = Comm::crc8(data, sizeof(Comm::ClonePacket) - 1);
             if (calc_crc == clonePkt->crc8) {
+                // Wi-Fi task 콜백에서 EEPROM.commit()과 delay()를 직접 호출하면
+                // Wi-Fi 스택이 블로킹되어 저장 실패나 크래시가 발생한다.
+                // 플래그만 세우고 main loop에서 안전하게 처리한다.
                 for (int i = 0; i < 6; i++) {
-                    EEPROM.write(EEPROM_CLONED_MAC_ADDR + i, clonePkt->macAddress[i]);
+                    clonedMacBuffer[i] = clonePkt->macAddress[i];
                 }
-                EEPROM.write(EEPROM_CLONED_MAC_FLAG, 0xAA);
-                EEPROM.commit();
-                
-                logPrintf(LogLevel::LOG_INFO, "CLONE: SUCCESS! Rebooting as Clone...");
-                delay(500);
-                ESP.restart(); // 쌍둥이로 변신하기 위해 자동 재부팅
+                cloneReceivedFlag = true;
             }
         }
         return; 

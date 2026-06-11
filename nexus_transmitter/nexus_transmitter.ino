@@ -49,6 +49,28 @@ void setup() {
 }
 
 void loop() {
+    // [FIX] CLONE RX: Wi-Fi 콜백 밖에서 안전하게 EEPROM 저장 및 재부팅 처리
+    if (cloneReceivedFlag) {
+        cloneReceivedFlag = false;
+        for (int i = 0; i < 6; i++) {
+            EEPROM.write(EEPROM_CLONED_MAC_ADDR + i, clonedMacBuffer[i]);
+        }
+        EEPROM.write(EEPROM_CLONED_MAC_FLAG, 0xAA);
+        EEPROM.commit();
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        displayCenteredModeName("SYNC (SPARE)");
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 9);
+        display.println("SYNC SUCCESS!");
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 18);
+        display.println("Rebooting...");
+        display.display();
+        logPrintf(LogLevel::LOG_INFO, "CLONE: SUCCESS! Rebooting as Clone...");
+        delay(500);
+        ESP.restart();
+    }
+
     updateButtons();
     handleButtons();
     updateVibrationMotor();

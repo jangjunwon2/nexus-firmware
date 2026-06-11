@@ -11,6 +11,8 @@
 #include "driver/rtc_io.h"
 #include "utils_t.h"
 
+unsigned long cloneTxSentAt = 0;
+
 void changeMode(Mode newMode) {
     if (currentMode != newMode) {
         logPrintf(LogLevel::LOG_INFO, "[STATE] Mode Changed: %s -> %s", getModeString(currentMode), getModeString(newMode));
@@ -117,11 +119,11 @@ void handleButtons() {
         case MODE_CLONE_TX:             handleCloneTxButtons(); break;
         case MODE_CLONE_RX:             handleCloneRxButtons(); break;
         
+        case MODE_OTA_SUCCESS:          handleOtaSuccessButtons(); break;
         case MODE_BOOT:
         case MODE_OTA_SCANNING:
         case MODE_OTA_DOWNLOADING:
         case MODE_OTA_UPDATING:
-        case MODE_OTA_SUCCESS:
         case MODE_ERROR:
             break;
         case MODE_OTA_CONNECTING:
@@ -190,7 +192,10 @@ void handleHomeMenuButtons() {
 void handleCloneTxButtons() {
     if (buttonEnter.isPressed()) {
         sendCloneAnnounce();
+        cloneTxSentAt = millis();
+        updateDisplay();
     } else if (buttonBack.isPressed()) {
+        cloneTxSentAt = 0;
         navigateBack();
     }
 }
@@ -468,5 +473,14 @@ void handleOtaErrorButtons() {
         else changeMode(MODE_HOME_MENU);
         uiState.menuCursor = 0;
         modeHistory.clear();
+    }
+}
+
+void handleOtaSuccessButtons() {
+    if (buttonUp.isPressed() || buttonDown.isPressed() || buttonEnter.isPressed() || buttonBack.isPressed()) {
+        logPrintf(LogLevel::LOG_INFO, "[BUTTON] OTA Success acknowledged, rebooting...");
+        Serial.end();
+        delay(200);
+        ESP.restart();
     }
 }

@@ -69,7 +69,7 @@ constexpr const char* FIRMWARE_NOTES   = "Initial release";
 const int CURSOR_X = 0;
 const int TEXT_X = 10;
 
-#define WIFI_CONNECT_TIMEOUT_MS   5000
+#define WIFI_CONNECT_TIMEOUT_MS   15000
 #define ADC_MAX_READING       4095
 #define ADC_REF_VOLTAGE       3.3  
 #define VOLTAGE_DIVIDER_RATIO 2.0f 

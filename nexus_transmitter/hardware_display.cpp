@@ -3,6 +3,7 @@
 #include "config_t.h"
 #include "hardware_display.h"
 #include "hardware_core.h"
+#include "hardware_buttons.h"
 #include "utils_t.h"
 #include <algorithm>
 #include <vector>
@@ -98,10 +99,17 @@ void updateDisplay() {
 // [NEW] 무선 복제 UI 추가
 void displayCloneTxMode() {
     displayCenteredModeName("SYNC (MAIN)");
-    display.setCursor(TEXT_X, OLED_MENU_START_Y + 9);
-    display.println("Press ENTER to Sync"); // 동기화하려면 ENTER 누르세요
-    display.setCursor(TEXT_X, OLED_MENU_START_Y + 27);
-    display.println("Press BACK to Exit");
+    if (cloneTxSentAt > 0 && millis() - cloneTxSentAt < 3000) {
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 9);
+        display.println("SIGNAL SENT!");
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 18);
+        display.println("Check SPARE device");
+    } else {
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 9);
+        display.println("Press ENTER to Sync");
+        display.setCursor(TEXT_X, OLED_MENU_START_Y + 27);
+        display.println("Press BACK to Exit");
+    }
 }
 
 void displayCloneRxMode() {

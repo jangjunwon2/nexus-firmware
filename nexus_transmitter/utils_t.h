@@ -61,4 +61,26 @@ void clearKnownNetworks();
 // [NEW] 디버깅을 위한 모드 문자열 변환 함수 선언
 const char* getModeString(int mode);
 
+inline bool isVersionNewer(const String& latest, const String& current) {
+    if (latest.isEmpty() || current.isEmpty() || latest == "N/A" || latest == current) return false;
+    int current_idx = 0, latest_idx = 0;
+    while (current_idx < (int)current.length() || latest_idx < (int)latest.length()) {
+        long current_val = 0;
+        int current_part_end = current.indexOf('.', current_idx);
+        if (current_part_end == -1) current_part_end = current.length();
+        if (current_idx < (int)current.length()) current_val = current.substring(current_idx, current_part_end).toInt();
+
+        long latest_val = 0;
+        int latest_part_end = latest.indexOf('.', latest_idx);
+        if (latest_part_end == -1) latest_part_end = latest.length();
+        if (latest_idx < (int)latest.length()) latest_val = latest.substring(latest_idx, latest_part_end).toInt();
+
+        if (latest_val > current_val) return true;
+        if (latest_val < current_val) return false;
+        current_idx = current_part_end + 1;
+        latest_idx = latest_part_end + 1;
+    }
+    return false;
+}
+
 #endif // UTILS_T_H

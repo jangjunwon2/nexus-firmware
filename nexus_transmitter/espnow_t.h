@@ -19,6 +19,10 @@ void deinitEspNow();
 // [NEW] 무선 복제 송신 함수 선언
 void sendCloneAnnounce();
 
+// Wi-Fi 콜백 밖에서 안전하게 EEPROM/재부팅 처리하기 위한 플래그
+extern volatile bool cloneReceivedFlag;
+extern volatile uint8_t clonedMacBuffer[6];
+
 namespace Comm {
 inline void fillPacket(CommPacket &pkt, PacketType type, uint8_t tgtId, uint32_t txButtonPressMicros, const DeviceSettings& settings, uint32_t rttUs, uint32_t rxProcessingTimeUs) {
     memcpy(pkt.signature, kSig, 4);

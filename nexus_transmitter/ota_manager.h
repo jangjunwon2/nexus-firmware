@@ -5,7 +5,7 @@
 
 #include "config_t.h"
 
-#define OTA_AP_PREFIX "Nexus_Update"
+#define OTA_AP_PREFIX "Nexus Transmitter"
 #define OTA_AP_CHANNEL 1
 #define OTA_AP_MAX_CONN 2
 #define OTA_AP_IP IPAddress(192, 168, 4, 1)

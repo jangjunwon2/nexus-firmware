@@ -51,9 +51,13 @@ void handleTimerMonitorButtons();
 void handleCompletionModeButtons();
 void handleApModeButtons();
 void handleOtaErrorButtons();
+void handleOtaSuccessButtons();
 
 // [NEW] 복제 모드용 버튼 핸들러
 void handleCloneTxButtons();
 void handleCloneRxButtons();
+
+// SYNC(MAIN) 전송 시각 (0 = 미전송, 화면 피드백용)
+extern unsigned long cloneTxSentAt;
 
 #endif // HARDWARE_BUTTONS_H
