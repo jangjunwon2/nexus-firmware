@@ -19,10 +19,6 @@ on:
       - "**/*.c"
       - "**/.build"
 
-concurrency:
-  group: firmware-deploy-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -75,6 +71,9 @@ jobs:
     if: ${{ needs.discover.outputs.matrix != '[]' && needs.discover.outputs.matrix != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: firmware-build-${{ matrix.device }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
