@@ -28,10 +28,20 @@ jobs:
   # 1단계: 리포에서 빌드 대상 장치를 감지해 매트릭스 생성
   discover:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.find.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+       - name: Cache Arduino packages
+         uses: actions/cache@v4
+         with:
+           path: |
+             ~/.arduino15
+             ~/bin/arduino-cli
+           key: arduino-cli-esp32-${{ runner.os }}-v1
+           restore-keys: |
+             arduino-cli-esp32-${{ runner.os }}-
         with:
           fetch-depth: 0
 
