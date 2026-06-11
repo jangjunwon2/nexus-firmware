@@ -19,13 +19,11 @@ on:
       - "**/*.c"
       - "**/.build"
 
-# 새 push가 들어오면 이전 실행 취소 — stale build가 DB를 덮어쓰지 못하게 방지
 concurrency:
   group: firmware-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # 1단계: 리포에서 빌드 대상 장치를 감지해 매트릭스 생성
   discover:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -33,15 +31,6 @@ jobs:
       matrix: ${{ steps.find.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-       - name: Cache Arduino packages
-         uses: actions/cache@v4
-         with:
-           path: |
-             ~/.arduino15
-             ~/bin/arduino-cli
-           key: arduino-cli-esp32-${{ runner.os }}-v1
-           restore-keys: |
-             arduino-cli-esp32-${{ runner.os }}-
         with:
           fetch-depth: 0
 
@@ -81,11 +70,11 @@ jobs:
           echo "matrix=$DEVICES" >> $GITHUB_OUTPUT
           echo "빌드 대상: $DEVICES"
 
-  # 2단계: 장치별 병렬 빌드 + 배포
   build:
     needs: discover
     if: ${{ needs.discover.outputs.matrix != '[]' && needs.discover.outputs.matrix != '' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -94,13 +83,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Arduino packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-esp32-libs-${{ runner.os }}-v1
+          restore-keys: |
+            arduino-esp32-libs-${{ runner.os }}-
+
       - name: Extract version
         id: ver
         run: |
           DEVICE_DIR="${{ matrix.device }}"
 
-          # config.h 또는 config_t.h의 FIRMWARE_VERSION 추출
-          # #define FIRMWARE_VERSION "x.x" 및 constexpr const char* FIRMWARE_VERSION = "x.x" 두 형식 모두 지원
           VERSION=""
           for CFG in "${DEVICE_DIR}/config.h" "${DEVICE_DIR}/config_t.h"; do
             if [ -f "$CFG" ]; then
@@ -140,9 +137,9 @@ jobs:
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
           git clone --depth 1 https://github.com/me-no-dev/AsyncTCP \
-            ~/Arduino/libraries/AsyncTCP
+            ~/Arduino/libraries/AsyncTCP || true
           git clone --depth 1 https://github.com/me-no-dev/ESPAsyncWebServer \
-            ~/Arduino/libraries/ESPAsyncWebServer
+            ~/Arduino/libraries/ESPAsyncWebServer || true
 
       - name: Compile
         run: |
@@ -196,8 +193,6 @@ jobs:
         run: |
           DEVICE="${{ matrix.device }}"
 
-          # pending 행(download_url="")을 장치+버전으로 직접 UPDATE
-          # 매칭 실패(0 rows) = 사용자가 이미 다른 버전을 올림 = stale build → 생략
           PAYLOAD=$(jq -n \
             --arg url "$DOWNLOAD_URL" \
             --arg sp  "$STORAGE_PATH" \
@@ -231,7 +226,6 @@ jobs:
         run: |
           DEVICE="${{ matrix.device }}"
 
-          # 완료된(download_url != "") 구 버전만 삭제 — pending 행(download_url="")은 보호
           OLD=$(curl -s \
             "${SUPABASE_URL}/rest/v1/firmware_releases?device_type=eq.${DEVICE}&version=neq.${VERSION}&download_url=neq.&select=id,storage_path" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
