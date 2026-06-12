@@ -143,12 +143,26 @@ jobs:
       - name: Compile
         run: |
           mkdir -p build
+          INO_COUNT=$(find ./${{ matrix.device }} -name "*.ino" | wc -l)
+          if [ "$INO_COUNT" -eq "0" ]; then
+            echo "::error::.ino 파일을 찾을 수 없습니다: ${{ matrix.device }}"
+            exit 1
+          fi
+          if [ "$INO_COUNT" -gt "1" ]; then
+            echo "::warning::.ino 파일이 여러 개 감지됐습니다. 첫 번째 파일을 사용합니다:"
+            find ./${{ matrix.device }} -name "*.ino"
+          fi
           SKETCH=$(find ./${{ matrix.device }} -name "*.ino" | head -1)
           echo "빌드: $SKETCH (v${{ steps.ver.outputs.version }})"
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" \
             "$SKETCH" \
             --output-dir ./build
+          BIN_CHECK=$(find ./build -name "*.ino.bin" | head -1)
+          if [ -z "$BIN_CHECK" ]; then
+            echo "::error::컴파일 후 바이너리(.ino.bin)를 찾을 수 없습니다."
+            exit 1
+          fi
 
       - name: Upload binary to Supabase Storage
         id: upload
@@ -237,17 +251,23 @@ jobs:
           fi
 
           PREFIXES=$(echo "$OLD" | jq '[.[].storage_path]')
-          curl -s -X DELETE \
+          STORAGE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
             "${SUPABASE_URL}/storage/v1/object/firmware" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"prefixes\": ${PREFIXES}}"
+            -d "{\"prefixes\": ${PREFIXES}}")
+          if [ "$STORAGE_STATUS" -ge 400 ]; then
+            echo "::warning::구 버전 스토리지 파일 삭제 실패 (HTTP ${STORAGE_STATUS}) — DB 레코드는 계속 삭제합니다."
+          fi
 
           IDS=$(echo "$OLD" | jq -r '[.[].id] | join(",")')
-          curl -s -X DELETE \
+          DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
             "${SUPABASE_URL}/rest/v1/firmware_releases?id=in.(${IDS})" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-            -H "apikey: ${SUPABASE_SERVICE_KEY}"
-
-          echo "🗑️ 이전 버전 ${COUNT}개 삭제 완료"
+            -H "apikey: ${SUPABASE_SERVICE_KEY}")
+          if [ "$DB_STATUS" -ge 400 ]; then
+            echo "::warning::구 버전 DB 레코드 삭제 실패 (HTTP ${DB_STATUS})"
+          else
+            echo "🗑️ 이전 버전 ${COUNT}개 삭제 완료"
+          fi
