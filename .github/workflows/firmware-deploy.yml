@@ -73,7 +73,7 @@ jobs:
     timeout-minutes: 30
     concurrency:
       group: firmware-build-${{ matrix.device }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -208,9 +208,9 @@ jobs:
 
           UPDATED=$(echo "$RESPONSE" | jq 'if type == "array" then length else 0 end' 2>/dev/null || echo "0")
           if [ "$UPDATED" -eq "0" ]; then
-            echo "⚠️ ${DEVICE} v${VERSION}: pending 행 없음 — stale build, 등록 생략"
+            echo "::error::${DEVICE} v${VERSION}: pending 행 없음 — 소스 업로드 없이 재빌드됐거나 버전 불일치"
             echo "registered=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
 
           echo "✅ ${DEVICE} v${VERSION} 완료"
