@@ -11,7 +11,7 @@
 #include "espnow_comm_shared.h"
 
 // --- 펌웨어 버전 ---
-constexpr const char* FIRMWARE_VERSION = "1.0";
+constexpr const char* FIRMWARE_VERSION = "1.1";
 
 // --- 디버깅 ---
 constexpr bool DEBUG_MODE = true;
@@ -28,7 +28,6 @@ constexpr uint8_t LED_PIN = 48;
 
 // --- 버튼 타이밍 및 설정 ---
 constexpr unsigned long DEBOUNCE_DELAY_MS = 50;
-constexpr unsigned long SHORT_PRESS_THRESHOLD_MS = 2000;
 constexpr unsigned long LONG_PRESS_THRESHOLD_MS = 2000;
 constexpr unsigned long ID_SET_TIMEOUT_MS = 5000;
 
@@ -47,7 +46,7 @@ constexpr uint8_t MIN_DEVICE_ID = 1;
 constexpr uint8_t MAX_DEVICE_ID = 20; 
 
 // --- ESP-NOW 설정 ---
-constexpr uint8_t ESP_NOW_CHANNEL = 1;
+extern uint8_t ESP_NOW_CHANNEL;
 static const uint8_t BROADCAST_ADDRESS[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 // --- WI-FI 및 WEB UI 설정 ---
@@ -92,6 +91,7 @@ enum class DeviceMode {
     MODE_TEST,
     MODE_EXIT_WIFI,
     MODE_PAIRING, // [NEW] 무선 페어링 모드
+    MODE_RF_SCAN,
     MODE_ERROR
 };
 

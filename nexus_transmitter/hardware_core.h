@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include "config_t.h"       // For Mode, RunningDevice, DeviceSettings, global variables
 #include "utils_t.h"        // For logPrintf, saveSettings, getTimerMs
-#include "espnow_t.h"       // For manageCommunication, sendExecutionCommand
+#include "espnow_t.h"       // For manageCommunication, sendFireBurst
 #include "hardware_buttons.h" // For Button objects used in updateButtons()
 
 //────────────────────────────────────────────────────────────────────────
@@ -35,5 +35,6 @@ int getBatteryPercentage(float voltage);
 void prepareForExecution();
 void startGroupExecution(unsigned long buttonPressTime);
 void startSingleExecution(uint8_t deviceID, unsigned long buttonPressTime);
+void serviceHold(bool down, bool group); // [NEW] 홀드 킵얼라이브 서비스 (매 루프 호출)
 
 #endif // HARDWARE_CORE_H

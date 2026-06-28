@@ -23,6 +23,7 @@ public:
     void handleEspNowSendStatus(esp_now_send_status_t status);
     
     void sendAck(const uint8_t* targetMac, const Comm::CommPacket& originalPacket, uint32_t rx_time);
+    void sendAckBroadcast(uint32_t originalTxMicros); // [NEW] 지연 ACK용 (txMicros만으로 브로드캐스트)
     void reinitForEspNow();
     uint8_t getChannel() const;
 

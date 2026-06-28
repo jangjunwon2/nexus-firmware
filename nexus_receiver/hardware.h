@@ -36,11 +36,11 @@ private:
     unsigned long _bothButtonsPressTimestamp;
     bool _inBothPressSequence;
     std::atomic<ButtonEventType> _currentButtonEvent;
-    unsigned long _execButtonPressedDuration;
+    std::atomic<unsigned long> _execButtonPressedDuration;
 
     std::atomic<LedPatternType> _currentLedPattern;
-    int _ledTargetBlinkCount;
-    unsigned long _ledPatternStartTime;
+    std::atomic<int> _ledTargetBlinkCount;
+    std::atomic<unsigned long> _ledPatternStartTime;
     bool _ledState;
     
     std::atomic<uint8_t> _mosfetPwmValue; 

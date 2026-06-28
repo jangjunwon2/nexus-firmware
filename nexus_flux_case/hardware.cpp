@@ -68,7 +68,7 @@ ButtonEventType HardwareManager::getButtonEvent() {
 }
 
 unsigned long HardwareManager::getExecButtonPressedDuration() const {
-    return _execButtonPressedDuration;
+    return _execButtonPressedDuration.load();
 }
 
 void HardwareManager::processButtonInput() {
@@ -129,19 +129,19 @@ void HardwareManager::processButtonInput() {
         _execButtonPressTimestamp = currentTime;
         _currentButtonEvent = ButtonEventType::EXEC_BUTTON_PRESS;
     } else if (!_execButtonState && _execButtonPressTimestamp > 0) {
-        _execButtonPressedDuration = currentTime - _execButtonPressTimestamp;
+        _execButtonPressedDuration.store(currentTime - _execButtonPressTimestamp);
         _currentButtonEvent = ButtonEventType::EXEC_BUTTON_RELEASE;
         _execButtonPressTimestamp = 0;
     }
 }
 
 void HardwareManager::setLedPattern(LedPatternType pattern, int repeatCount) {
-    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
+    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount.load() == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
         return;
     }
-    _currentLedPattern = pattern;
-    _ledTargetBlinkCount = repeatCount;
-    _ledPatternStartTime = millis();
+    _ledTargetBlinkCount.store(repeatCount);
+    _ledPatternStartTime.store(millis());
+    _currentLedPattern.store(pattern);
 }
 
 void HardwareManager::updateLed() {
@@ -156,7 +156,7 @@ void HardwareManager::updateLed() {
         return;
     }
 
-    unsigned long elapsedTime = millis() - _ledPatternStartTime;
+    unsigned long elapsedTime = millis() - _ledPatternStartTime.load();
 
     switch (pattern) {
         case LedPatternType::LED_BOOT_SUCCESS:
@@ -186,7 +186,7 @@ void HardwareManager::updateLed() {
 
         case LedPatternType::LED_ID_DISPLAY: {
             unsigned long blinkDuration = 2 * LED_ID_BLINK_INTERVAL_MS;
-            unsigned long totalDuration = (unsigned long)_ledTargetBlinkCount * blinkDuration;
+            unsigned long totalDuration = (unsigned long)_ledTargetBlinkCount.load() * blinkDuration;
             if (elapsedTime >= totalDuration) {
                 setLed(false);
                 _currentLedPattern = LedPatternType::LED_OFF;

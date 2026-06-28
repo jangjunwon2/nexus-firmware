@@ -15,6 +15,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
+#include <memory>
 
 // External declaration for global instance defined in .ino file
 // WebManager webManager;
@@ -22,14 +23,125 @@
 // WebManager의 static 인스턴스 포인터 초기화
 WebManager* WebManager::_instance = nullptr;
 
+
+static const char I18N_JS[] PROGMEM = R"rawliteral(
+
+        const _LC=['EN','한','中','日','DE','ES','FR'];
+        function _getLi(){const r=localStorage.getItem('nx_lang');if(r==='ko'||r===null)return 1;if(r==='en')return 0;const n=parseInt(r,10);return isNaN(n)?1:n;}
+        function setLang(i){localStorage.setItem('nx_lang',String(i));location.reload();}
+        function toggleLangMenu(e){e.stopPropagation();document.getElementById('lang-sw').classList.toggle('open');}
+        document.addEventListener('click',function(e){const sw=document.getElementById('lang-sw');if(sw&&!sw.contains(e.target))sw.classList.remove('open');});
+        window.LANG_IDX=_getLi();
+        const I18N={
+back_home:["Back to Home","홈으로 돌아가기","返回主页","ホームに戻る","Zurück","Volver","Retour"],
+home_btn:["Back to Home","홈으로 돌아가기","返回主页","ホームに戻る","Zurück","Volver","Retour"],
+pg_home:["Nexus Pot","Nexus 팟","Nexus 锅","Nexus ポット","Nexus Topf","Nexus Olla","Nexus Pot"],
+pg_wifi:["Wi-Fi Settings","Wi-Fi 설정","Wi-Fi 设置","Wi-Fi 設定","WLAN Einstellungen","Ajustes Wi-Fi","Paramètres Wi-Fi"],
+pg_update:["Firmware Update","펌웨어 업데이트","固件更新","ファームウェア更新","Firmware-Update","Actualización Firmware","Mise à jour Firmware"],
+pg_test:["Test Mode","테스트 모드","测试模式","テストモード","Testmodus","Modo de prueba","Mode de test"],
+pg_exit:["Exiting Wi-Fi Mode","Wi-Fi 모드 종료","退出 Wi-Fi 模式","Wi-Fiモード終了","WLAN-Modus beenden","Salir Modo Wi-Fi","Sortie Mode Wi-Fi"],
+pg_manual:["User Manual","사용 설명서","用户手册","取扱説明書","Benutzerhandbuch","Manual de usuario","Manuel d'utilisation"],
+h_wifi_status:["Wi-Fi Status","Wi-Fi 상태","Wi-Fi 状态","Wi-Fi 状態","WLAN Status","Estado Wi-Fi","État Wi-Fi"],
+h_dev_ctrl:["Device Control","기기 제어","设备控制","機器制御","Gerätesteuerung","Control del Dispositivo","Contrôle Appareil"],
+h_btn_wifi:["Wi-Fi Settings","Wi-Fi 설정","Wi-Fi 设置","Wi-Fi 設定","WLAN Einstellungen","Ajustes Wi-Fi","Paramètres Wi-Fi"],
+h_btn_update:["Firmware Update","펌웨어 업데이트","固件更新","ファームウェア更新","Firmware-Update","Actualizar Firmware","Mise à jour"],
+h_btn_test:["Test Mode","테스트 모드","测试模式","テストモード","Testmodus","Modo de prueba","Mode de test"],
+h_btn_manual:["User Manual","사용 설명서","用户手册","取扱説明書","Benutzerhandbuch","Manual","Manuel"],
+h_btn_exit:["Exit Wi-Fi Mode","Wi-Fi 모드 종료","退出 Wi-Fi 模式","Wi-Fiモード終了","WLAN beenden","Salir Wi-Fi","Quitter Wi-Fi"],
+h_not_conn:["Not connected. AP Mode active.","연결 안 됨. AP 모드 활성화 중.","未连接，AP模式激活","未接続。APモード有効","Nicht verbunden. AP Modus","No conectado. Modo AP","Non connecté. Mode AP"],
+h_connected:["Connected to","에 연결됨","已连接:","接続済:","Verbunden mit","Conectado a","Connecté à"],
+h_ip_addr:["IP:","IP:","IP:","IP:","IP:","IP:","IP:"],
+w_loading:["Loading...","불러오는 중...","加载中...","読み込み中...","Laden...","Cargando...","Chargement..."],
+w_cur_status:["Current Wi-Fi Status","현재 Wi-Fi 상태","当前 Wi-Fi 状态","現在のWi-Fi状態","Aktueller WLAN Status","Estado Wi-Fi actual","État Wi-Fi actuel"],
+w_conn_card:["Wi-Fi Connection","Wi-Fi 연결","Wi-Fi 连接","Wi-Fi 接続","WLAN-Verbindung","Conexión Wi-Fi","Connexion Wi-Fi"],
+w_sel_ssid:["Select SSID:","네트워크 선택:","选择 SSID:","SSID 選択:","SSID wählen:","Selec. SSID:","Sélec. SSID:"],
+w_scan_ph:["-- Scan to select a network --","-- 스캔 후 선택 --","-- 扫描后选择 --","-- スキャン後選択 --","-- Scannen --","-- Escanear red --","-- Scanner --"],
+w_rescan:["Rescan","재스캔","重新扫描","再スキャン","Neu scannen","Reescanear","Rescanner"],
+w_pass:["Password:","비밀번호:","密码:","パスワード:","Passwort:","Contraseña:","Mot de passe:"],
+w_connect:["Connect","연결","连接","接続","Verbinden","Conectar","Connecter"],
+w_disconnect:["Disconnect","연결 해제","断开","切断","Trennen","Desconectar","Déconnecter"],
+u_cur_ver:["Current Version:","현재 버전:","当前版本:","現在バージョン:","Aktuelle Version:","Versión actual:","Version actuelle:"],
+u_lat_ver:["Latest on Server:","서버 최신:","服务器最新:","サーバー最新:","Neueste Version:","Última en servidor:","Dernière version:"],
+u_btn:["Update","업데이트","更新","更新","Aktualisieren","Actualizar","Mettre à jour"],
+u_btn_done:["Update Complete","업데이트 완료","更新完成","更新完了","Update fertig","Actualización lista","Mise à jour faite"],
+exit_msg:["The device will now return to normal operation. You can close this window.","기기가 정상 동작 모드로 돌아갑니다. 이 창을 닫아도 됩니다.","设备即将返回正常操作，可关闭此窗口。","デバイスは通常操作に戻ります。このウィンドウを閉じてください。","Gerät kehrt in Normalbetrieb zurück.","El dispositivo vuelve al modo normal.","L'appareil revient en mode normal."],
+exit_ota_msg:["An update was downloaded and will be applied on reboot.","업데이트가 다운로드됐습니다. 재시작 후 자동 적용됩니다.","更新已下载，将在重启后应用。","アップデートがダウンロードされ、再起動後に適用されます。","Update heruntergeladen und wird nach Neustart angewendet.","La actualización fue descargada y se aplicará al reiniciar.","La mise à jour a été téléchargée et sera appliquée au redémarrage."],
+dev_settings:["Device Settings","기기 설정","设备设置","デバイス設定","Geräteeinstellungen","Config. Dispositivo","Paramètres Appareil"],
+dev_id_label:["Device ID :","기기 ID :","设备 ID :","デバイス ID :","Gerät-ID :","ID Dispositivo :","ID Appareil :"],
+save_btn:["Save","저장","保存","保存","Speichern","Guardar","Enregistrer"],
+delay_label:["Delay (sec) :","딜레이 (초) :","延迟 (秒) :","遅延 (秒) :","Verzögerung (s) :","Retardo (s) :","Délai (s) :"],
+play_label:["Play time (sec) :","실행 시간 (초) :","执行时间 (秒) :","実行時間 (秒) :","Spielzeit (s) :","Tiempo (s) :","Durée (s) :"],
+run_btn:["Run Manual Test","수동 테스트 실행","手动测试","手動テスト実行","Manueller Test","Prueba Manual","Test Manuel"],
+running_btn:["Running...","실행 중...","执行中...","実行中...","Läuft...","Ejecutando...","En cours..."],
+log_title:["Live Log","실시간 로그","实时日志","ライブログ","Live-Log","Registro en Vivo","Journal en Direct"],
+log_clear:["clear","지우기","清除","クリア","Löschen","Limpiar","Effacer"],
+no_remote_warn:["Remote control communication is not available in this mode.<br>Normal communication resumes after exiting.","이 모드에서는 리모컨과의 통신이 지원되지 않습니다.<br>모드 종료 후 정상 통신이 활성화됩니다.","此模式不支持与发射器连接。<br>退出此模式后，通信将恢复正常。","このモードでは送信機との通信はサポートされません。<br>モード終了後に通信が有効になります。","Dieser Modus unterstützt keine Verbindung zum Sender.<br>Nach dem Beenden wird die Kommunikation aktiviert.","Este modo no admite conexión con el transmisor.<br>La comunicación se habilitará al salir.","Ce mode ne prend pas en charge la connexion à l'émetteur.<br>La communication sera activée à la sortie."],
+status_fail:["Failed to load device status.","기기 상태 불러오기 실패.","加载设备状态失败。","デバイス状態の読み込みに失敗。","Gerätestatus konnte nicht geladen werden.","Error al cargar estado.","Impossible de charger l'état."],
+save_ok:["ID saved!","ID 저장 완료!","ID 已保存！","ID 保存完了！","ID gespeichert!","¡ID guardado!","ID enregistré !"],
+save_fail:["Failed to save ID.","ID 저장 실패.","ID 保存失败。","ID の保存に失敗。","ID konnte nicht gespeichert werden.","Error al guardar ID.","Impossible d'enregistrer l'ID."],
+test_fail:["Failed to start test.","테스트 시작 실패.","测试启动失败。","テスト開始に失敗。","Test konnte nicht gestartet werden.","Error al iniciar la prueba.","Impossible de démarrer le test."],
+log_start:["Test started: delay {d}s, play {p}s","테스트 시작: 딜레이 {d}초, 실행 {p}초","测试开始：延迟{d}s，执行{p}s","テスト開始：遅延{d}秒、実行{p}秒","Test gestartet: {d}s/{p}s","Prueba iniciada: {d}s/{p}s","Test démarré: {d}s/{p}s"],
+log_done:["Test complete.","테스트 완료.","测试完成。","テスト完了。","Test abgeschlossen.","Prueba completada.","Test terminé."],
+msg_scanning:["Scanning for Wi-Fi networks...","Wi-Fi 네트워크 스캔 중...","扫描 Wi-Fi 网络...","Wi-Fi検索中...","WLAN suchen...","Buscando redes...","Recherche réseaux..."],
+msg_scanning_opt:["Scanning...","스캔 중...","扫描中...","スキャン中...","Suche...","Buscando...","Recherche..."],
+msg_scan_ok:["Scan complete. Select a network.","스캔 완료. 네트워크를 선택하세요.","扫描完成，请选择网络。","スキャン完了。ネットワークを選択してください。","Scan abgeschlossen. Netz wählen.","Escaneo completo. Elige red.","Scan terminé. Sélectionnez un réseau."],
+msg_no_nets:["No Wi-Fi networks found.","Wi-Fi 네트워크를 찾을 수 없습니다.","未找到 Wi-Fi 网络。","Wi-Fiネットワークが見つかりません。","Keine WLAN-Netzwerke gefunden.","No se encontraron redes Wi-Fi.","Aucun réseau Wi-Fi trouvé."],
+msg_scan_fail:["Failed to start scan.","스캔 시작 실패.","启动扫描失败。","スキャン開始に失敗。","Scan konnte nicht gestartet werden.","Error al iniciar el escaneo.","Impossible de lancer le scan."],
+msg_connecting:["Attempting to connect...","연결 시도 중...","尝试连接...","接続試行中...","Verbinde...","Intentando conectar...","Connexion en cours..."],
+msg_conn_ok:["Wi-Fi connection successful!","Wi-Fi 연결됨!","Wi-Fi 已连接！","Wi-Fi 接続完了！","WLAN verbunden!","¡Wi-Fi conectado!","Wi-Fi connecté!"],
+msg_conn_fail:["Connection failed. Please check your password.","연결 실패. 비밀번호를 확인하세요.","连接失败，检查密码","接続失敗。パスワード確認","Verbindung fehlgeschlagen","Conexión fallida","Connexion échouée"],
+msg_conn_fail_range:["Connection failed. The network is out of range or not found.","연결 실패. 네트워크를 찾을 수 없습니다.","连接失败。网络超出范围或未找到。","接続失敗。ネットワークが範囲外または見つかりません。","Verbindung fehlgeschlagen. Netz nicht in Reichweite.","Fallo: red fuera de rango o no encontrada.","Échec: réseau hors portée ou introuvable."],
+msg_conn_fail_env:["Connection failed. Environment may be unstable.","연결 실패. 환경이 불안정할 수 있습니다.","连接失败。环境可能不稳定。","接続失敗。環境が不安定な可能性があります。","Verbindung fehlgeschlagen. Umgebung könnte instabil sein.","Fallo: el entorno puede ser inestable.","Échec: l'environnement peut être instable."],
+msg_disconnecting:["Disconnecting...","연결 해제 중...","正在断开...","切断中...","Trennen...","Desconectando...","Déconnexion..."],
+msg_disconnected:["Disconnected from Wi-Fi.","Wi-Fi 연결 해제됨","已断开 Wi-Fi","Wi-Fi切断","WLAN getrennt","Wi-Fi desconectado","Wi-Fi déconnecté"],
+msg_not_conn_s:["Not Connected","미연결","未连接","未接続","Nicht verbunden","No conectado","Non connecté"],
+msg_confirm_disc:["Are you sure you want to disconnect? The saved password for this network will be removed.","연결을 끊겠습니까? 이 네트워크의 저장된 비밀번호가 삭제됩니다.","确认断开？该网络的保存密码将被删除。","接続を切断しますか？このネットワークの保存済みパスワードが削除されます。","Verbindung trennen? Gespeichertes Passwort wird gelöscht.","¿Desconectar? La contraseña guardada se eliminará.","Déconnecter? Le mot de passe enregistré sera supprimé."],
+msg_select_net:["Please select a network first.","먼저 네트워크를 선택하세요","请先选择网络","ネットワークを選択してください","Bitte Netz wählen","Seleccione una red","Sélectionner un réseau"],
+msg_sel_net_ph:["-- Select a Network --","-- 네트워크 선택 --","-- 选择网络 --","-- ネットワーク選択 --","-- Netz wählen --","-- Selec. red --","-- Sélec. réseau --"],
+msg_disc_fail:["Failed to send disconnect request.","연결 해제 요청 실패.","发送断开请求失败。","切断リクエストの送信に失敗。","Trennungsanfrage fehlgeschlagen.","Error al enviar solicitud de desconexión.","Échec de la demande de déconnexion."],
+msg_up2date:["You are on the latest version.","최신 버전입니다.","已是最新版本","最新バージョンです","Neueste Version vorhanden","Versión más reciente","Version la plus récente"],
+msg_update_avail:["Update available!","업데이트 사용 가능!","有可用更新！","アップデートあり！","Update verfügbar!","¡Actualización disponible!","Mise à jour disponible!"],
+msg_update_done:["Download complete! Update will be applied on exit.","다운로드 완료! Wi-Fi 종료 후 적용됩니다.","下载完成！退出Wi-Fi后应用。","ダウンロード完了！Wi-Fi終了後に適用。","Download fertig! Update nach WLAN-Exit.","Descarga completa. Se aplica al salir.","Téléchargement terminé. Appliqué à la sortie."],
+msg_downloading:["Firmware is downloading. Device will reboot when done.","다운로드 중. 완료 후 재부팅됩니다.","固件下载中，完成后重启。","DL中。完了後に再起動。","Herunterladen... Neustart folgt.","Descargando... Se reiniciará.","Téléchargement en cours..."],
+msg_confirm_upd:["Start download? The device may be unresponsive during download. The update will be applied on exit.","다운로드 시작? 다운로드 중 기기가 반응하지 않을 수 있습니다. Wi-Fi 모드 종료 시 적용됩니다.","开始下载？下载期间设备可能无响应，退出Wi-Fi后应用。","ダウンロード開始？ダウンロード中はデバイスが応答しない場合があります。Wi-Fi終了後に適用。","Herunterladen? Gerät reagiert möglicherweise nicht. Nach WLAN-Exit anwenden.","¿Iniciar descarga? El dispositivo puede no responder. Aplica al salir.","Lancer le téléchargement? L'appareil peut ne pas répondre. Appliqué à la sortie."],
+msg_wifi_req:["Internet Wi-Fi required. Connect to Wi-Fi with internet access first.","인터넷 Wi-Fi 연결이 필요합니다. 먼저 인터넷이 연결된 Wi-Fi에 접속하세요.","需要连接互联网Wi-Fi，请先连接有互联网的Wi-Fi。","インターネットWi-Fiが必要です。先にインターネット接続のあるWi-Fiに接続してください。","WLAN mit Internet erforderlich. Bitte zuerst verbinden.","Se requiere Wi-Fi con internet. Conéctate primero.","Wi-Fi internet requis. Connectez-vous d'abord."],
+msg_check_fail:["Check failed. Make sure Wi-Fi is connected to the internet.","확인 실패. 인터넷이 연결된 Wi-Fi에 접속되어 있는지 확인하세요.","检查失败，请确保Wi-Fi已连接至互联网。","確認失敗。インターネット接続を確認してください。","Fehler. Bitte WLAN mit Internet verbinden.","Error. Compruebe la conexión Wi-Fi a Internet.","Échec. Vérifiez la connexion Wi-Fi à Internet."],
+msg_conn_req_fail:["Failed to send connection request.","연결 요청 전송 실패.","发送连接请求失败。","接続リクエストの送信に失敗。","Verbindungsanfrage fehlgeschlagen.","Error al enviar solicitud de conexión.","Échec de la demande de connexion."],
+        };
+        function wt(k){const a=I18N[k];if(!a)return k;return a[window.LANG_IDX]||a[0]||k;}
+        function wtf(k,vars){let s=wt(k);for(const [kk,v] of Object.entries(vars))s=s.replace('{'+kk+'}',v);return s;}
+        function applyI18n(){
+            document.querySelectorAll('[data-i18n]').forEach(el=>{const t=wt(el.getAttribute('data-i18n'));if(t)el.textContent=t;});
+            document.querySelectorAll('[data-i18n-html]').forEach(el=>{const t=wt(el.getAttribute('data-i18n-html'));if(t)el.innerHTML=t;});
+            document.querySelectorAll('[data-i18n-ph]').forEach(el=>{const t=wt(el.getAttribute('data-i18n-ph'));if(t)el.placeholder=t;});
+        }
+        function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+        function showMessage(text, type='info', duration=3000){let m=document.getElementById('global-message-box');if(!m){m=document.createElement('div');m.id='global-message-box';document.body.appendChild(m);}m.textContent=text;m.className='message-box message-'+type+' show';if(duration>0)setTimeout(()=>m.classList.remove('show'),duration);}
+        document.addEventListener('DOMContentLoaded',function(){
+            applyI18n();
+            const cb=document.getElementById('lang-cur-btn');
+            if(cb)cb.innerHTML='🌐 '+(_LC[window.LANG_IDX]||'한')+' &#9662;';
+            document.querySelectorAll('.lang-opt').forEach(b=>b.classList.toggle('active',+b.dataset.lang===window.LANG_IDX));
+        });
+    )rawliteral";
+
+static void sendResponse(AsyncWebServerRequest *request, int code, const String& contentType, const String& content) {
+    AsyncWebServerResponse *response = request->beginResponse(code, contentType, content);
+    response->addHeader("Connection", "close");
+    request->send(response);
+}
+
 WebManager::WebManager() :
     _server(80), _ws("/ws"), _modeManager(nullptr), _commManager(nullptr),
     _isServerRunning(false), _otaUpdateDownloaded(false),
-    _isScanningWifi(false), _isConnectingWifi(false), _isCheckingOta(false),
-    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion("N/A"), _otaChangeLog("N/A"), _otaFirmwareUrl(""), _otaUpdateAvailable(false),
+    _isScanningWifi(false), _isConnectingWifi(false), _isCheckingOta(false), _isDownloadingOta(false),
+    _currentFirmwareVersion(FIRMWARE_VERSION), _latestOtaVersion(""), _otaChangeLog(""), _otaFirmwareUrl(""), _otaUpdateAvailable(false),
     _wifiEventId(0), _lastDisconnectReason(0), _wifiConnectStartMillis(0),
-    _disconnectedForTestSsid(""), _reconnectOnExitTest(false)
+    _disconnectedForTestSsid(""), _reconnectOnExitTest(false),
+    _pendingSaveCredential(false)
 {
+    _pendingCredSSID[0] = '\0';
+    _pendingCredPwd[0] = '\0';
     _otaDataMutex = xSemaphoreCreateMutex();
 }
 
@@ -53,6 +165,11 @@ void WebManager::loop() {
     for (;;) {
         if (_isServerRunning.load()) {
             _ws.cleanupClients();
+            if (_pendingSaveCredential) {
+                _pendingSaveCredential = false;
+                Utils::saveWifiCredential(String(_pendingCredSSID), String(_pendingCredPwd));
+                Log::Info(PSTR("WEB: Saved WiFi credentials for '%s'"), _pendingCredSSID);
+            }
             if (_isConnectingWifi.load() && (millis() - _wifiConnectStartMillis > WIFI_CONNECT_TIMEOUT_MS)) {
                 _isConnectingWifi = false;
                 Log::Warn(PSTR("WEB: WiFi connection timed out."));
@@ -91,8 +208,8 @@ void WebManager::stopServer() {
     // [수정] 서버 객체를 정리하기 전에 루프가 더 이상 실행되지 않도록 플래그를 먼저 설정합니다.
     _isServerRunning = false;
 
-    // 잠시 대기하여 WebManagerLoop가 플래그 변경을 인지할 시간을 줍니다.
-    vTaskDelay(pdMS_TO_TICKS(10)); 
+    // loop() 주기(100ms)보다 긴 시간을 대기하여 루프가 플래그 변경을 확실히 인지하게 함.
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     _ws.closeAll();
     _server.end();
@@ -139,10 +256,26 @@ void WebManager::broadcastTestComplete() {
     broadcastJson(doc);
 }
 
+void WebManager::broadcastTestStart(uint32_t delayMs, uint32_t playMs) {
+    JsonDocument doc;
+    doc["type"]     = "test_start";
+    doc["ts"]       = millis();
+    doc["delay_ms"] = delayMs;
+    doc["play_ms"]  = playMs;
+    broadcastJson(doc);
+}
+
 // --- Page and API Handler Implementations ---
 
 void WebManager::setupRoutes() {
+        _server.on("/i18n.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "application/javascript", (const uint8_t*)I18N_JS, strlen_P(I18N_JS));
+        response->addHeader("Connection", "close");
+        request->send(response);
+    });
+
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest* r){ handleRoot(r); });
+    _server.on("/manual", HTTP_GET, [this](AsyncWebServerRequest* r){ handleManualPage(r); });
     _server.on("/wifi", HTTP_GET, [this](AsyncWebServerRequest* r){ handleWifiConfigPage(r); });
     _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest* r){ handleFirmwareUpdatePage(r); });
     _server.on("/test", HTTP_GET, [this](AsyncWebServerRequest* r){ handleTestModePage(r); });
@@ -174,275 +307,213 @@ void WebManager::handleRoot(AsyncWebServerRequest* request) {
     // [FIX] 테스트 모드에서 복귀 시 WiFi 재연결을 위해 이 라인을 다시 추가합니다.
     reconnectWifiIfNeeded();
     
-    String html = getPageHeader("Nexus Smoke");
-    html += "<div class='card'><h3>Wi-Fi Status</h3><p id='home-wifi-status'>Loading...</p></div>";
-    html += "<div class='card'><h3>Device Control</h3>"
-            "<p><a href='/wifi' class='btn'>Wi-Fi Settings</a></p>"
-            "<p><a href='/update' class='btn'>Firmware Update</a></p>"
-            "<p><a href='/test' class='btn'>Test Mode</a></p>"
-            "<p><a href='/exit' class='btn btn-danger'>Exit Wi-Fi Mode</a></p>"
-            "</div>";
-    html += getPageFooter(false);
-    html += R"rawliteral(
+    String html = getPageHeader("Nexus Pot", "pg_home");
+    html += F("<div class='card'><h3 data-i18n='h_wifi_status'>Wi-Fi 상태</h3><p id='home-wifi-status' data-i18n='w_loading'>불러오는 중...</p></div>");
+    html += F("<div class='card'><h3 data-i18n='h_dev_ctrl'>기기 제어</h3>"
+              "<p><a href='/wifi' class='btn' data-i18n='h_btn_wifi'>Wi-Fi 설정</a></p>"
+              "<p><a href='/update' class='btn' data-i18n='h_btn_update'>펌웨어 업데이트</a></p>"
+              "<p><a href='/test' class='btn' data-i18n='h_btn_test'>테스트 모드</a></p>"
+              "<p><a href='/manual' class='btn' data-i18n='h_btn_manual'>사용 설명서</a></p>"
+              "<p><a href='/exit' class='btn btn-danger' data-i18n='h_btn_exit'>Wi-Fi 모드 종료</a></p>"
+              "</div>");
+        html += R"rawliteral(
         <script>
-            function connectWsForStatus(){
-                let ws = new WebSocket("ws://"+window.location.host+"/ws");
+            let ws;
+            function connectWs() {
+                ws = new WebSocket("ws://"+window.location.host+"/ws");
                 ws.onmessage = e => {
-                    try { 
-                        const d = JSON.parse(e.data); 
-                        if (d.type === "wifi_status_update") { 
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.type === "wifi_status_update") {
                             let s = document.getElementById("home-wifi-status");
-                            if (d.connected) {
-                                s.innerHTML = "Connected to <b>" + d.ssid + "</b><br>IP Address: " + d.ip;
-                            } else {
-                                s.textContent = "Not connected. AP Mode is active.";
+                            if (s) {
+                                if (d.connected) {
+                                    s.innerHTML = wt('h_connected') + ": <b>" + escHtml(d.ssid) + "</b><br>" + wt('h_ip_addr') + " " + d.ip;
+                                } else {
+                                    s.textContent = wt('h_not_conn');
+                                }
                             }
-                        } 
+                        }
                     } catch(err) {
-                        console.error("Home WS Parse Error:", err);
+                        console.error(err);
                     }
                 };
-                ws.onclose = () => { setTimeout(connectWsForStatus, 2000); };
+                ws.onclose = () => { setTimeout(connectWs, 2000); };
+                ws.onerror = () => { ws.close(); };
             }
-            window.onload = connectWsForStatus;
+            document.addEventListener('DOMContentLoaded', connectWs);
         </script>
     )rawliteral";
-    request->send(200, "text/html; charset=UTF-8", html);
+
+html += getPageFooter(false);
+
+    sendResponse(request, 200, "text/html; charset=UTF-8", html);
 }
 
 void WebManager::handleWifiConfigPage(AsyncWebServerRequest* request) {
     if (_modeManager) _modeManager->recordWebApiActivity();
-    String html = getPageHeader("WiFi Settings");
+    String html = getPageHeader("Wi-Fi 설정", "pg_wifi");
     html += R"rawliteral(
         <div class="card">
-            <h2>Current WiFi Status</h2>
-            <p id="conn-status">Loading...</p>
+            <h2 data-i18n='w_cur_status'>현재 Wi-Fi 상태</h2>
+            <p id="conn-status" data-i18n='w_loading'>불러오는 중...</p>
         </div>
         <div class="card">
-            <h2>WiFi Connection</h2>
+            <h2 data-i18n='w_conn_card'>Wi-Fi 연결</h2>
             <div class="form-group" style="text-align: center;">
-                <label for="ssid-select">Select SSID:</label>
+                <label for="ssid-select" data-i18n='w_sel_ssid'>네트워크 선택:</label>
                 <select id="ssid-select" class="form-control">
-                    <option value="">-- Scan to select a network --</option>
+                    <option value="">-- 스캔 후 선택 --</option>
                 </select>
             </div>
             <div style="display: flex; justify-content: center; margin-top: 20px; gap: 10px;">
-                <button id="scan-btn" class="btn" onclick="scanWifi()">Rescan</button>
+                <button id="scan-btn" class="btn" onclick="scanWifi()" data-i18n='w_rescan'>다시 스캔</button>
             </div>
             <div class="form-group" style="text-align: center;">
-                <label for="password-input">Password:</label>
+                <label for="password-input" data-i18n='w_pass'>비밀번호:</label>
                 <input type="password" id="password-input" class="form-control">
             </div>
-            <!-- Unified Connect/Disconnect button -->
-            <button id="action-btn" class="btn" onclick="handleConnectDisconnect()">Connect</button> 
+            <button id="action-btn" class="btn" onclick="handleConnectDisconnect()" data-i18n='w_connect'>연결</button>
         </div>
         <script>
             const scanBtn = document.getElementById("scan-btn");
-            const actionBtn = document.getElementById("action-btn"); 
+            const actionBtn = document.getElementById("action-btn");
             const ssidSelect = document.getElementById("ssid-select");
             const passwordInput = document.getElementById("password-input");
             const connStatusEl = document.getElementById("conn-status");
-            let ws, currentSsid = '';
-            
-            // WebSocket 연결 설정
+            let ws, currentSsid = '', isConnected = false;
+
             function connectWs() {
-                ws = new WebSocket(`ws://${location.host}/ws`);
-                ws.onopen = () => { 
-                    console.log('WebSocket Connected'); 
-                    fetchStatus(); 
-                };
-                ws.onclose = () => { 
-                    console.log('WebSocket Disconnected, reconnecting...'); 
-                    setTimeout(connectWs, 2000); 
-                };
+                ws = new WebSocket('ws://'+location.host+'/ws');
+                ws.onclose = () => { setTimeout(connectWs, 2000); };
                 ws.onmessage = evt => {
                     try {
                         const data = JSON.parse(evt.data);
                         if (data.type === "wifi_status_update") handleWifiStatus(data);
                         if (data.type === "scan_result") handleScanResult(data);
-                    } catch (e) { 
-                        console.error("WS Parse Error:", e); 
-                    }
+                    } catch (e) {}
                 };
             }
 
-            // API에서 현재 WiFi 상태 가져오기
-            function fetchStatus() { 
-                fetch("/api/wifi-status")
-                    .then(response => response.json())
-                    .then(data => handleWifiStatus(data))
-                    .catch(err => console.error('Error fetching status:', err));
+            function fetchStatus() {
+                fetch("/api/wifi-status").then(r=>r.json()).then(data=>handleWifiStatus(data)).catch(()=>{});
             }
 
-            // 연결/연결 해제 버튼 클릭 처리
             function handleConnectDisconnect() {
-                if (actionBtn.textContent === "Connect") {
-                    connectWifi();
-                } else if (actionBtn.textContent === "Disconnect") {
-                    disconnectWifi();
-                }
+                if (isConnected) disconnectWifi();
+                else connectWifi();
             }
 
-            // WiFi 상태에 따라 UI 업데이트
             function handleWifiStatus(data) {
                 currentSsid = data.connected ? data.ssid : '';
-
-                actionBtn.disabled = false;
-                scanBtn.disabled = false;
-                passwordInput.disabled = false;
-                ssidSelect.disabled = false;
-                actionBtn.classList.remove('btn-danger', 'btn-success');
+                isConnected = !!data.connected;
+                actionBtn.disabled = false; scanBtn.disabled = false;
+                passwordInput.disabled = false; ssidSelect.disabled = false;
+                actionBtn.classList.remove('btn-danger');
 
                 if (data.connected) {
-                    connStatusEl.innerHTML = `Connected to <b>${data.ssid}</b> (IP: ${data.ip})`;
-                    actionBtn.textContent = "Disconnect";
+                    connStatusEl.innerHTML = '<b>'+escHtml(data.ssid)+'</b>'+wt('h_connected')+' ('+wt('h_ip_addr')+' '+escHtml(data.ip)+')';
+                    actionBtn.textContent = wt('w_disconnect');
                     actionBtn.classList.add('btn-danger');
-                    passwordInput.disabled = true;
-                    ssidSelect.disabled = true;
-                    scanBtn.disabled = true;
-
-                    if (data.status === "connected") { 
-                        showMessage("WiFi connection successful!", 'success'); 
-                    }
-                } else { // 연결되지 않음
-                    connStatusEl.textContent = "Not Connected";
-                    actionBtn.textContent = "Connect";
-                    actionBtn.classList.add('btn');
-                    
+                    passwordInput.disabled = true; ssidSelect.disabled = true; scanBtn.disabled = true;
+                    if (data.status === "connected") showMessage(wt('msg_conn_ok'), 'success');
+                } else {
+                    connStatusEl.textContent = wt('msg_not_conn_s');
+                    actionBtn.textContent = wt('w_connect');
                     switch (data.status) {
                         case "connecting":
-                            showMessage("Connecting to selected WiFi...", 'info', 0);
-                            actionBtn.disabled = true; 
-                            scanBtn.disabled = true;
-                            passwordInput.disabled = true;
-                            ssidSelect.disabled = true;
+                            showMessage(wt('msg_connecting'), 'info', 0);
+                            actionBtn.disabled = true; scanBtn.disabled = true;
+                            passwordInput.disabled = true; ssidSelect.disabled = true;
                             break;
                         case "failed":
-                            actionBtn.disabled = false; 
-                            scanBtn.disabled = false;
-                            passwordInput.disabled = false;
-                            ssidSelect.disabled = false;
-                            if (data.reason === 15 || data.reason === 2 || data.reason === 8) {
-                                showMessage("Connection failed. Please check your password.", 'error');
-                            } else if (data.reason === 201) {
-                                showMessage("Connection failed. The network is out of range or not found.", 'error');
-                            } else {
-                                showMessage(`Connection failed. Environment may be unstable. (Reason: ${data.reason})`, 'error');
-                            }
+                            if (data.reason === 15 || data.reason === 2 || data.reason === 8) showMessage(wt('msg_conn_fail'), 'error');
+                            else if (data.reason === 201) showMessage(wt('msg_conn_fail_range'), 'error');
+                            else showMessage(wt('msg_conn_fail_env'), 'error');
                             break;
-                        case "disconnected":
-                            showMessage("Disconnected from WiFi.", 'info'); 
-                            break;
-                        default:
-                            break;
+                        case "disconnected": showMessage(wt('msg_disconnected'), 'info'); break;
+                        default: break;
                     }
                 }
             }
 
-            // WiFi 스캔 시작 함수
             function scanWifi() {
                 if (scanBtn.disabled) return;
                 scanBtn.disabled = true;
-                ssidSelect.innerHTML = "<option>Scanning...</option>";
-                showMessage("Scanning for WiFi networks...", "info");
-                fetch("/api/scan-wifi").catch(error => {
-                    showMessage("Failed to start scan.", "error");
-                    scanBtn.disabled = false;
-                });
+                ssidSelect.innerHTML = "<option value=''>"+wt('msg_scanning_opt')+"</option>";
+                showMessage(wt('msg_scanning'), "info");
+                fetch("/api/scan-wifi").catch(() => { showMessage(wt('msg_scan_fail'), "error"); scanBtn.disabled = false; });
             }
 
-            // 스캔 결과 처리
             function handleScanResult(data) {
-                ssidSelect.innerHTML = "<option value=''>-- Select a Network --</option>";
+                ssidSelect.innerHTML = "<option value=''>"+wt('msg_sel_net_ph')+"</option>";
                 if (data.networks && data.networks.length > 0) {
                     data.networks.slice(0, 20).forEach(net => {
-                        const lockIcon = net.encrypted ? "🔒" : " ";
-                        const option = new Option(`${lockIcon} ${net.ssid} (${net.rssi} dBm)`, net.ssid);
-                        ssidSelect.add(option);
+                        ssidSelect.add(new Option((net.encrypted?"🔒 ":"  ")+net.ssid+" ("+net.rssi+" dBm)", net.ssid));
                     });
-                    showMessage("Scan complete. Select a network.", "success");
+                    showMessage(wt('msg_scan_ok'), "success");
                 } else {
-                    ssidSelect.innerHTML = "<option>No WiFi networks found.</option>";
-                    showMessage("No WiFi networks found.", "error");
+                    ssidSelect.innerHTML = "<option value=''>"+wt('msg_no_nets')+"</option>";
+                    showMessage(wt('msg_no_nets'), "error");
                 }
                 scanBtn.disabled = false;
             }
-            
-            // 선택된 WiFi에 연결하는 함수
+
             function connectWifi() {
                 const ssid = ssidSelect.value;
-                if (!ssid) {
-                    showMessage("Please select a network first.", "error");
-                    return;
-                }
-                actionBtn.disabled = true;
-                scanBtn.disabled = true;
-                passwordInput.disabled = true;
-                ssidSelect.disabled = true;
-                showMessage("Attempting to connect...", "info", 0);
-                const password = passwordInput.value;
+                if (!ssid) { showMessage(wt('msg_select_net'), "error"); return; }
+                actionBtn.disabled = true; scanBtn.disabled = true;
+                passwordInput.disabled = true; ssidSelect.disabled = true;
+                showMessage(wt('msg_connecting'), "info", 0);
                 fetch("/api/connect-wifi", {
                     method: "POST",
                     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    body: `ssid=${encodeURIComponent(ssid)}&password=${encodeURIComponent(password)}`
-                }).catch(err => {
-                    showMessage("Failed to send connection request.", "error");
-                    actionBtn.disabled = false;
-                    scanBtn.disabled = false;
-                    passwordInput.disabled = false;
-                    ssidSelect.disabled = false;
+                    body: "ssid="+encodeURIComponent(ssid)+"&password="+encodeURIComponent(passwordInput.value)
+                }).catch(() => {
+                    showMessage(wt('msg_conn_req_fail'), "error");
+                    actionBtn.disabled = false; scanBtn.disabled = false;
+                    passwordInput.disabled = false; ssidSelect.disabled = false;
                 });
             }
 
-            // WiFi 연결 해제 함수
             function disconnectWifi() {
-                if (!window.confirm(`Are you sure you want to disconnect from ${currentSsid}? The saved password for this network will be removed.`)) {
-                    return;
-                }
+                if (!window.confirm(wt('msg_confirm_disc'))) return;
                 actionBtn.disabled = true;
-                showMessage('Disconnecting...', 'info', 0);
+                showMessage(wt('msg_disconnecting'), 'info', 0);
                 fetch("/api/disconnect-wifi", {
                     method: "POST",
                     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    body: `ssid=${encodeURIComponent(currentSsid)}`
-                }).then(() => {
-                    passwordInput.value = '';
-                }).catch(err => {
-                    showMessage('Failed to send disconnect request.', 'error');
-                });
+                    body: "ssid="+encodeURIComponent(currentSsid)
+                }).then(() => { passwordInput.value = ''; })
+                  .catch(() => { showMessage(wt('msg_disc_fail'), 'error'); });
             }
 
-            // 창 로드 시 WebSocket 초기화 및 초기 스캔/상태 확인
-            window.onload = () => {
-                connectWs();
-                fetchStatus(); 
-                setTimeout(scanWifi, 500); 
-            };
+            window.onload = () => { connectWs(); fetchStatus(); setTimeout(scanWifi, 500); };
         </script>
     )rawliteral";
     html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+    sendResponse(request, 200, "text/html; charset=UTF-8", html);
 }
 
 void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest* request) {
     if (_modeManager) _modeManager->recordWebApiActivity();
-    String html = getPageHeader("Firmware Update");
+    String html = getPageHeader("펌웨어 업데이트", "pg_update");
     html += R"rawliteral(
         <div class='card'>
-            <p>Current Version: <b id='current-v'>-</b><br>Latest on Server: <b id='latest-v'>-</b></p>
+            <p><span data-i18n='u_cur_ver'>현재 버전:</span> <b id='current-v'>-</b><br><span data-i18n='u_lat_ver'>서버 최신 버전:</span> <b id='latest-v'>-</b></p>
             <div id='update-info'>
                  <div id='changelog' class='changelog'></div>
                  <p id='update-status'></p>
             </div>
-            <div class="form-group" style="text-align: center;"> <!-- 버튼 중앙 정렬 -->
-                <button id='update-btn' class='btn hidden' onclick='downloadUpdate()'>Update</button> <!-- 버튼 텍스트 변경 -->
+            <div class="form-group" style="text-align: center;">
+                <button id='update-btn' class='btn hidden' onclick='downloadUpdate()' data-i18n='u_btn'>업데이트</button>
                 <div id='download-progress' class='hidden' style='margin-top: 10px; display: flex; flex-direction: column; align-items: center;'>
                     <span id='progress-text' style='font-weight: bold;'>0%</span>
                     <div class='progress-bar'>
                         <div class='progress-bar-inner' id='progress-bar-inner'></div>
                     </div>
                 </div>
-                <p id='download-notice' class='hidden notice'>Firmware will be downloaded now. The update will be applied when you exit Wi-Fi mode.</p>
+                <p id='download-notice' class='hidden notice' data-i18n='msg_downloading'>펌웨어를 다운로드합니다. Wi-Fi 모드 종료 시 업데이트가 적용됩니다.</p>
             </div>
         </div>
         <script>
@@ -463,77 +534,63 @@ void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest* request) {
                         if (d.type === "ota_status") updateOtaUi(d);
                         if (d.type === "ota_progress") updateProgressText(d.progress);
                         if (d.type === "ota_result") handleOtaResult(d);
-                        if (d.type === "wifi_status_update") {
-                            console.log("WiFi status changed, re-checking OTA status.");
-                            fetch("/api/check-ota");
-                        }
-                    } catch(err) { console.error("OTA WS Error:", err); }
+                        if (d.type === "wifi_status_update") fetch("/api/check-ota");
+                    } catch(err) {}
                 };
                 ws.onopen = () => fetch("/api/check-ota");
                 ws.onclose = () => setTimeout(connectWs, 2000);
             }
 
             function updateOtaUi(d) {
-                document.getElementById("current-v").textContent = d.current_version;
-                document.getElementById("latest-v").textContent = d.latest_version;
-                
+                document.getElementById("current-v").textContent = d.current_version || "—";
+                document.getElementById("latest-v").textContent = d.latest_version || "—";
+
                 if (!d.internet_ok) {
-                     updateStatus.innerHTML = "<span class='message-error'>Server access is required for updates. Please connect to a Wi-Fi network with internet access first.</span>";
-                     changelogEl.textContent = "Cannot fetch changelog without an internet connection.";
+                     updateStatus.innerHTML = "<span class='message-error'>"+wt('msg_wifi_req')+"</span>";
+                     changelogEl.textContent = wt('msg_check_fail');
                      updateBtn.classList.add("hidden");
-                     downloadProgressDiv.classList.add('hidden'); 
+                     downloadProgressDiv.classList.add('hidden');
                      return;
                 }
 
-                changelogEl.textContent = d.changelog || "Could not retrieve changelog.";
+                changelogEl.textContent = d.check_ok ? (d.changelog || '') : wt('msg_check_fail');
 
                 if (d.update_available) {
-                    updateStatus.innerHTML = "<b style='color:green;'>Update available!</b>";
+                    updateStatus.innerHTML = "<b style='color:#6ee7b7;'>"+wt('msg_update_avail')+"</b>";
                     updateBtn.classList.remove("hidden");
                     updateBtn.disabled = false;
-                    downloadProgressDiv.classList.add('hidden'); 
+                    downloadProgressDiv.classList.add('hidden');
                 } else {
-                    updateStatus.textContent = "You are on the latest version.";
+                    updateStatus.textContent = wt('msg_up2date');
                     updateBtn.classList.add("hidden");
-                    downloadProgressDiv.classList.add('hidden'); 
+                    downloadProgressDiv.classList.add('hidden');
                 }
             }
-            
+
             function downloadUpdate() {
-                const customConfirm = (msg, onConfirm, onCancel) => {
-                     if (window.confirm(msg)) { 
-                        onConfirm();
-                    } else {
-                        onCancel();
-                    }
-                };
-                customConfirm("Start download? The device may be unresponsive during download. The update will be applied on exit.", () => {
-                    updateBtn.disabled = true;
-                    downloadNotice.classList.remove("hidden");
-                    downloadProgressDiv.classList.remove('hidden'); 
-                    updateProgressText(0); 
-                    fetch("/api/download-ota", { method: "POST" });
-                }, () => {
-                    // 사용자가 취소함
-                });
+                if (!window.confirm(wt('msg_confirm_upd'))) return;
+                updateBtn.disabled = true;
+                downloadNotice.classList.remove("hidden");
+                downloadProgressDiv.classList.remove('hidden');
+                updateProgressText(0);
+                fetch("/api/download-ota", { method: "POST" });
             }
 
             function updateProgressText(progress) {
-                progressText.textContent = `${progress}%`;
-                progressBarInner.style.width = `${progress}%`;
+                progressText.textContent = progress+"%";
+                progressBarInner.style.width = progress+"%";
             }
-            
+
             function handleOtaResult(d) {
-                showMessage(d.msg, d.success ? 'success' : 'error'); // showMessage 사용
+                showMessage(d.msg, d.success ? 'success' : 'error');
+                downloadProgressDiv.classList.add('hidden');
+                downloadNotice.classList.add('hidden');
                 if (d.success) {
-                    updateBtn.textContent = "Update Complete";
-                    updateBtn.classList.remove("btn");
+                    updateBtn.textContent = wt('u_btn_done');
                     updateBtn.classList.add('btn-success');
-                    downloadProgressDiv.classList.add('hidden'); 
                 } else {
-                    updateBtn.textContent = "Update"; 
+                    updateBtn.textContent = wt('u_btn');
                     updateBtn.disabled = false;
-                    downloadProgressDiv.classList.add('hidden'); 
                 }
             }
 
@@ -541,7 +598,7 @@ void WebManager::handleFirmwareUpdatePage(AsyncWebServerRequest* request) {
         </script>
     )rawliteral";
     html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+    sendResponse(request, 200, "text/html; charset=UTF-8", html);
 }
 
 void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
@@ -554,45 +611,41 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
         WiFi.disconnect(true);
     }
 
-    String html = getPageHeader("Test Mode");
+    String html = getPageHeader("테스트 모드", "pg_test");
     html += R"rawliteral(
         <div class='card'>
-            <h3>Device Settings</h3>
+            <h3 data-i18n='dev_settings'>기기 설정</h3>
             <table style='width:100%; text-align:left; border-spacing: 0 10px; border-collapse: separate;'>
               <tr>
-                <td style='width:140px;'><label for='dev-id'>Device ID :</label></td>
+                <td style='width:140px;'><label for='dev-id' data-i18n='dev_id_label'>기기 ID :</label></td>
                 <td>
                   <div style='display:flex; align-items:center;'>
-                    <input type='number' id='dev-id' min='1' max='10' style='width: 80px; margin:0;'>
-                    <button onclick='saveId()' class='btn' style='padding:5px 10px; min-width:auto; margin-left: 10px;'>Save</button>
+                    <input type='number' id='dev-id' min='1' max='20' style='width: 80px; margin:0;'>
+                    <button onclick='saveId()' class='btn' data-i18n='save_btn' style='padding:5px 10px; min-width:auto; margin-left: 10px;'>저장</button>
                   </div>
                 </td>
               </tr>
               <tr>
-                <td><label for='delay-s'>Delay Timer (s) :</label></td>
-                <td><input type='number' id='delay-s' placeholder='Delay' step='0.1' style='width: 80px;'></td>
+                <td><label for='delay-s' data-i18n='delay_label'>딜레이 (초) :</label></td>
+                <td><input type='number' id='delay-s' step='0.1' style='width: 80px;'></td>
               </tr>
               <tr>
-                <td><label for='play-s'>Play Timer (s) :</label></td>
-                <td><input type='number' id='play-s' placeholder='Play' step='0.1' style='width: 80px;'></td>
+                <td><label for='play-s' data-i18n='play_label'>실행 시간 (초) :</label></td>
+                <td><input type='number' id='play-s' step='0.1' style='width: 80px;'></td>
               </tr>
             </table>
-            <p><button onclick='runTest()' id='run-test-btn' class='btn'>Run Manual Test</button></p>
+            <p><button onclick='runTest()' id='run-test-btn' class='btn' data-i18n='run_btn'>수동 테스트 실행</button></p>
         </div>
         <div class='card'>
-            <h3>Live Log (<a href='javascript:void(0);' onclick='document.getElementById("log").innerHTML=""'>Clear</a>)</h3>
-            <div id='log' style='height:300px;overflow-y:scroll;border:1px solid #ccc;text-align:left;padding:5px;font-family:monospace;font-size:0.9em;background:#333;color:#eee;white-space:pre-wrap;'></div>
-            <p style='margin-top:15px; font-weight: bold; color: #d9534f;'>
-                This mode does not support connection with the transmitter.<br>Communication will be enabled when you exit this mode.
+            <h3><span data-i18n='log_title'>실시간 로그</span> (<a href='javascript:void(0);' onclick='document.getElementById("log").innerHTML=""' data-i18n='log_clear'>지우기</a>)</h3>
+            <div id='log' style='height:300px;overflow-y:scroll;border:1px solid rgba(255,255,255,0.12);text-align:left;padding:5px;font-family:monospace;font-size:0.9em;background:rgba(0,0,0,0.4);color:#e5e7eb;white-space:pre-wrap;border-radius:8px;'></div>
+            <p style='margin-top:15px; font-weight: bold; color: #f87171;' data-i18n-html='no_remote_warn'>
+                이 모드에서는 리모컨과의 통신이 지원되지 않습니다.<br>모드 종료 후 정상 통신이 활성화됩니다.
             </p>
         </div>
         <script>
             let log=document.getElementById("log");
             let ws;
-
-            function showMessage(text, type = 'info', duration = 3000) {
-                console.log(`[${type}] ${text}`);
-            }
 
             function getStatus(){
                 fetch("/api/device-status")
@@ -602,23 +655,23 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
                     document.getElementById("delay-s").value = d.test_delay_ms / 1000.0;
                     document.getElementById("play-s").value = d.test_play_ms / 1000.0;
                 })
-                .catch(err => showMessage('Failed to fetch device status.', 'error'));
+                .catch(() => showMessage(wt('status_fail'), 'error'));
             }
-            
+
             function saveId(){
                 fetch("/api/set-device-id",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"id="+document.getElementById("dev-id").value})
                 .then(response => {
-                    if (response.ok) showMessage('ID Saved!', 'success');
-                    else showMessage('Failed to save ID.', 'error');
+                    if (response.ok) showMessage(wt('save_ok'), 'success');
+                    else showMessage(wt('save_fail'), 'error');
                 })
-                .catch(err => showMessage('Failed to save ID.', 'error'));
+                .catch(() => showMessage(wt('save_fail'), 'error'));
             }
 
             function runTest(){
                 let btn = document.getElementById('run-test-btn');
                 btn.disabled = true;
-                btn.textContent = 'Running...';
-                
+                btn.textContent = wt('running_btn');
+
                 let delayMs = parseFloat(document.getElementById('delay-s').value) * 1000;
                 let playMs = parseFloat(document.getElementById('play-s').value) * 1000;
 
@@ -630,11 +683,18 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
                     method:"POST",
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: formData
-                }).catch(err => {
-                    showMessage('Failed to start test.', 'error');
+                }).catch(() => {
+                    showMessage(wt('test_fail'), 'error');
                     btn.disabled = false;
-                    btn.textContent = 'Run Manual Test';
+                    btn.textContent = wt('run_btn');
                 });
+            }
+
+            function appendLog(msg, color) {
+                color = color || '#fff';
+                let ts = (Date.now() / 1000).toFixed(1);
+                log.innerHTML += `<div style="color:${color};">[${ts}s] ${msg}</div>`;
+                log.scrollTop = log.scrollHeight;
             }
 
             function connectWs() {
@@ -646,25 +706,21 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
                             log.innerHTML+=`<div style="color:#fff;">[${(d.ts / 1000).toFixed(1)}s] ${d.msg}</div>`;
                             log.scrollTop=log.scrollHeight;
                         }
+                        if(d.type==="test_start"){
+                            let dm=(d.delay_ms/1000).toFixed(1), pm=(d.play_ms/1000).toFixed(1);
+                            appendLog(wtf('log_start',{d:dm,p:pm}), '#a3e635');
+                        }
                         if(d.type==="test_completed"){
                              let btn = document.getElementById('run-test-btn');
                              btn.disabled = false;
-                             btn.textContent = 'Run Manual Test';
-                             log.innerHTML+=`<div style="color:#fff;">[${(Date.now() / 1000).toFixed(1)}s] Test Completed.</div>`;
+                             btn.textContent = wt('run_btn');
+                             appendLog(wt('log_done'), '#60a5fa');
                         }
-                    }catch(e){
-                        console.error("Test WS Parse Error:", e);
-                    }
+                    }catch(err){}
                 };
 
-                ws.onclose = () => {
-                    console.log("Test WS closed, reconnecting...");
-                    setTimeout(connectWs, 2000);
-                };
-                ws.onerror = (err) => {
-                    console.error("Test WS Error:", err);
-                    ws.close();
-                };
+                ws.onclose = () => { setTimeout(connectWs, 2000); };
+                ws.onerror = () => { ws.close(); };
             }
             window.onload = () => {
                 getStatus();
@@ -673,42 +729,275 @@ void WebManager::handleTestModePage(AsyncWebServerRequest* request) {
         </script>
     )rawliteral";
     html += getPageFooter(true);
-    request->send(200, "text/html; charset=UTF-8", html);
+    sendResponse(request, 200, "text/html; charset=UTF-8", html);
+}
+
+void WebManager::handleManualPage(AsyncWebServerRequest* request) {
+    if (_modeManager) _modeManager->recordWebApiActivity();
+    
+    struct ManualStreamState {
+        String header;
+        const char* body;
+        size_t bodyLen;
+        String footer;
+        int section = 0;
+        size_t offset = 0;
+    };
+
+    static const char MANUAL_BODY[] PROGMEM = R"rawliteral(
+    <style>
+        details{text-align:left;margin-bottom:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;}
+        summary{cursor:pointer;padding:14px 18px;font-weight:600;font-size:15px;color:#e5e7eb;background:rgba(255,255,255,0.03);list-style:none;display:flex;align-items:center;gap:8px;}
+        summary::-webkit-details-marker{display:none;}
+        summary::before{content:'▶';font-size:11px;color:#a78bfa;transition:transform 0.2s;flex-shrink:0;}
+        details[open] summary::before{transform:rotate(90deg);}
+        details[open] summary{color:#a78bfa;}
+        .mb{padding:14px 16px;font-size:14px;line-height:1.7;color:#d1d5db;border-top:1px solid rgba(255,255,255,0.05);overflow-x:auto;-webkit-overflow-scrolling:touch;}
+        .kb{display:inline-block;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:600;font-family:monospace;white-space:nowrap;}
+        .sl{margin:8px 0;padding-left:0;list-style:none;counter-reset:sc;}
+        .sl li{counter-increment:sc;display:flex;gap:10px;margin-bottom:8px;align-items:flex-start;}
+        .sl li::before{content:counter(sc);background:#6d28d9;color:white;border-radius:50%;width:20px;height:20px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;}
+        .tb{background:rgba(5,150,105,0.1);border:1px solid rgba(5,150,105,0.3);border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px;color:#6ee7b7;}
+        .wb{background:rgba(220,38,38,0.1);border:1px solid rgba(220,38,38,0.3);border-radius:8px;padding:10px 14px;margin-top:10px;font-size:13px;color:#fca5a5;}
+        .st{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;}
+        .st th{background:rgba(109,40,217,0.3);color:#c4b5fd;padding:7px 8px;text-align:left;font-weight:600;}
+        .st td{padding:6px 8px;border-top:1px solid rgba(255,255,255,0.05);color:#d1d5db;word-break:break-word;overflow-wrap:break-word;}
+        .st tr:nth-child(even) td{background:rgba(255,255,255,0.02);}
+        .st td:first-child,.st th:first-child{white-space:nowrap;}
+    </style>
+    <div class='card' style='text-align:left;'>
+    <details open>
+      <summary>💡 LED 상태 표시</summary>
+      <div class='mb'>
+        <p>기기 상단의 LED 색상과 패턴으로 현재 상태를 알 수 있습니다.</p>
+        <table class='st'>
+          <tr><th>LED 패턴</th><th>의미</th></tr>
+          <tr><td>꺼짐</td><td>정상 대기 중 — 리모컨 신호를 기다리고 있습니다</td></tr>
+          <tr><td>켜짐 (지속)</td><td>출력 중 — MOSFET이 활성화되어 기기가 작동하고 있습니다</td></tr>
+          <tr><td>1초 켜짐 후 꺼짐</td><td>부팅 완료 또는 페어링 성공</td></tr>
+          <tr><td>N회 깜빡임</td><td>현재 기기 ID를 숫자로 표시 (예: 3번 깜빡임 = ID 3)</td></tr>
+          <tr><td>빠른 반복 깜빡임</td><td>페어링 대기 중 — 리모컨의 MAC 주소를 기다립니다 (30초 타임아웃)</td></tr>
+          <tr><td>3회 깜빡임</td><td>Wi-Fi 모드 전환 중</td></tr>
+        </table>
+        <div class='tb'>💡 ID 설정 중에는 ID 버튼을 누를 때마다 짧게 한 번 깜빡여 번호 입력을 확인합니다.</div>
+        <div class='tb'>💡 ID가 3인 기기에서 ID 버튼을 짧게 누르면 3회 깜빡임이 나타갑니다. Wi-Fi 모드 전환 직후에도 3회 깜빡이므로 상황으로 구분하세요.</div>
+      </div>
+    </details>
+    <details>
+      <summary>🔢 기기 ID 설정</summary>
+      <div class='mb'>
+        <p>각 기기는 고유한 ID(1~20)를 가집니다. 리모컨은 이 ID로 원하는 기기를 지정합니다.</p>
+        <p style='margin-bottom:4px;'><b>현재 ID 확인:</b></p>
+        <ol class='sl'>
+          <li>ID 버튼을 <b>짧게</b> 누르면 LED가 현재 ID 번호만큼 깜빡입니다</li>
+        </ol>
+        <p style='margin-top:12px;margin-bottom:4px;'><b>ID 변경:</b></p>
+        <ol class='sl'>
+          <li>ID 버튼을 <b>길게</b> (2초) → ID 설정 모드 진입 (LED 1초 켜짐)</li>
+          <li>ID 버튼을 <b>짧게</b> 눌러 원하는 번호로 이동 (1→2→...→20→1 순환, 누를 때마다 깜빡임)</li>
+          <li>ID 버튼을 <b>길게</b> → 번호 확정 (LED 1초 켜짐 후 번호만큼 깜빡임)</li>
+        </ol>
+        <div class='tb'>💡 ID 설정 모드에서 5초 동안 아무 버튼도 누르지 않으면 이전 ID로 자동 복원됩니다.</div>
+        <div class='tb'>💡 ID 설정 모드에서 EXEC 버튼을 누르면 페어링 대기로 바로 진입합니다.</div>
+        <div class='wb'>⚠ 같은 그룹에 속한 기기끼리는 서로 다른 ID를 사용해야 합니다.</div>
+      </div>
+    </details>
+    <details>
+      <summary>⚡ EXEC 버튼 수동 작동</summary>
+      <div class='mb'>
+        <p>리모컨 없이 기기 본체의 EXEC 버튼으로 직접 출력할 수 있습니다.</p>
+        <p style='margin-top:10px;margin-bottom:4px;'><b>대기 중 (정상 상태):</b></p>
+        <p style='margin:0 0 0 8px;'>누르는 동안 100% 출력. 손을 떼면 즉시 정지</p>
+        <p style='margin-top:8px;margin-bottom:4px;'><b>리모컨 시퀀스 실행 중:</b></p>
+        <p style='margin:0 0 0 8px;'>누르면 현재 실행 중인 시퀀스를 강제 중단합니다</p>
+        <div class='wb' style='margin-top:10px;'>⚠ 연속 조작 방지를 위해 EXEC 버튼은 500ms 쿨다운이 있습니다.</div>
+        <div class='tb'>💡 리모컨에서도 실행 중 취소가 가능합니다 — 아래 '리모컨 취소 명령' 항목 참고.</div>
+      </div>
+    </details>
+    <details>
+      <summary>🛑 리모컨 취소 명령</summary>
+      <div class='mb'>
+        <p>리모컨(송신기)의 <span class='kb'>B</span> 버튼으로 실행 중인 시퀀스를 원격으로 제어할 수 있습니다.</p>
+        <table class='st'>
+          <tr><th>동작</th><th>결과</th></tr>
+          <tr><td><span class='kb'>▶</span> (플레이) 짧게 누름</td><td>리모컨만 홈 화면으로 복귀. <b>수신기 출력은 계속 진행</b>됩니다.</td></tr>
+          <tr><td><span class='kb'>B</span> 0.5초 이상 누름</td><td>모든 수신기에 즉시 취소 신호 전송 → 출력·시퀀스 즉시 중단.<br>리모컨 화면에 '취소됨' 메시지 표시 후 홈으로 이동.</td></tr>
+        </table>
+        <div class='tb' style='margin-top:10px;'>💡 취소 명령은 범위 내 <b>모든 기기</b>에 동시 전송됩니다. 특정 기기만 선택적으로 취소하려면 EXEC 버튼을 직접 누르세요.</div>
+        <div class='wb'>⚠ 취소 신호는 ESP-NOW 브로드캐스트로 전송되므로, 리모컨과 수신기가 같은 채널에 있어야 합니다. 채널이 다르면 수신되지 않습니다.</div>
+      </div>
+    </details>
+    <details>
+      <summary>🔗 리모컨 페어링</summary>
+      <div class='mb'>
+        <p>이 기기에 리모컨의 MAC 주소를 등록하는 과정입니다. 한 번만 하면 됩니다.</p>
+        <ol class='sl'>
+          <li>ID 버튼을 <b>길게</b> 눌러 ID 설정 모드 진입</li>
+          <li>ID 변경 필요 시: ID 버튼 <b>짧게</b> 눌러 번호 이동 → <b>길게</b> 눌러 확정</li>
+          <li>EXEC 버튼 → 페어링 대기 모드 진입 (LED 빠른 깜빡임)</li>
+          <li>리모컨에서: 홈 메뉴 → <b>페어링</b> → <span class='kb'>▶</span></li>
+          <li>LED가 꺼지면 페어링 완료!</li>
+        </ol>
+        <div class='tb'>✅ 페어링 완료 후 기기는 이 리모컨의 신호에만 반응합니다. 다른 리모컨 신호는 무시됩니다.</div>
+        <div class='tb'>💡 페어링 대기 중 ID 버튼 또는 EXEC 버튼을 누르면 페어링을 취소하고 정상 모드로 돌아갑니다.</div>
+        <div class='wb'>⚠ 페어링 대기는 30초 타임아웃입니다. 시간 내에 리모컨에서 페어링 신호를 보내세요.</div>
+      </div>
+    </details>
+    <details>
+      <summary>📡 Wi-Fi 모드 진입·종료</summary>
+      <div class='mb'>
+        <p>Wi-Fi 모드에서 기기 설정, 펌웨어 업데이트, 테스트 등을 할 수 있습니다.</p>
+        <p style='margin-bottom:4px;'><b>진입 방법:</b></p>
+        <ol class='sl'>
+          <li>ID 버튼과 EXEC 버튼을 <b>동시에 길게</b> (2초) 누르세요</li>
+          <li>LED 3회 깜빡임 후 Wi-Fi 모드 활성화</li>
+          <li>스마트폰 Wi-Fi에서 <b>Nexus_Pot</b>(비밀번호 없음)에 연결</li>
+          <li>브라우저에서 <b>192.168.4.1</b> 접속</li>
+        </ol>
+        <p style='margin-top:12px;margin-bottom:4px;'><b>종료 방법 (아래 중 하나):</b></p>
+        <ol class='sl'>
+          <li>웹 페이지 하단의 <b>Wi-Fi 모드 종료</b> 버튼 클릭</li>
+          <li>ID + EXEC 동시에 다시 길게 누르기</li>
+          <li>5분 동안 웹 활동 없으면 자동 종료</li>
+        </ol>
+        <div class='wb'>⚠ Wi-Fi 모드에서는 리모컨 통신(ESP-NOW)이 비활성화됩니다. 발사 신호를 받지 않습니다.</div>
+      </div>
+    </details>
+    <details>
+      <summary>🧪 테스트 모드</summary>
+      <div class='mb'>
+        <p>Wi-Fi 모드 접속 후 <b>테스트 모드</b> 페이지에서 기기 출력을 직접 테스트할 수 있습니다.</p>
+        <table class='st'>
+          <tr><th>기능</th><th>설명</th></tr>
+          <tr><td>기기 ID</td><td>기기 ID를 웹에서 직접 변경·저장</td></tr>
+          <tr><td>딜레이 (초)</td><td>테스트 시 출력 시작 전 대기 시간</td></tr>
+          <tr><td>실행 시간 (초)</td><td>테스트 시 출력 지속 시간</td></tr>
+          <tr><td>수동 테스트 실행</td><td>설정한 딜레이·실행 시간으로 즉시 테스트 실행</td></tr>
+          <tr><td>실시간 로그</td><td>실시간 실행 로그 표시</td></tr>
+        </table>
+        <div class='tb'>💡 테스트 중에도 기기 본체의 EXEC 버튼으로 수동 작동이 가능합니다.</div>
+        <div class='wb'>⚠ 테스트 모드에서는 리모컨 통신이 일시 중단됩니다. 테스트 모드 종료 후 자동으로 재연결됩니다.</div>
+      </div>
+    </details>
+    <details>
+      <summary>🔄 펌웨어 업데이트</summary>
+      <div class='mb'>
+        <p>Wi-Fi 모드에서 최신 펌웨어를 무선으로 업데이트할 수 있습니다.</p>
+        <ol class='sl'>
+          <li>Wi-Fi 모드 진입 후 192.168.4.1 접속</li>
+          <li><b>Wi-Fi 설정</b>에서 인터넷이 되는 Wi-Fi에 연결</li>
+          <li><b>펌웨어 업데이트</b> 페이지에서 최신 버전 확인</li>
+          <li>업데이트가 있으면 <b>업데이트</b> 버튼 클릭 → 다운로드 시작</li>
+          <li>다운로드 완료 후 <b>Wi-Fi 모드 종료</b> 클릭 → 자동 재부팅 후 업데이트 적용</li>
+        </ol>
+        <div class='tb'>💡 다운로드 중에는 전원을 끄지 마세요. 다운로드가 끝난 후 종료해야 업데이트가 적용됩니다.</div>
+        <div class='wb'>⚠ 인터넷 연결 없이는 버전 확인 및 업데이트가 불가능합니다.</div>
+      </div>
+    </details>
+    <details>
+      <summary>💡 마술 연출 및 응용 가이드</summary>
+      <div class='mb'>
+        <p><b>Nexus Pot</b> 수신기는 고전류 MOSFET 출력을 지원하며, 출력 전압을 <b>PWM(0%~100%)</b>으로 세밀하게 제어할 수 있습니다.</p>
+        <p style='margin-bottom:4px;'><b>대표적인 마술 연출 및 응용 예시:</b></p>
+        <ol class='sl'>
+          <li><b>솔레노이드 래치 개방 (전자 잠금장치)</b>: 상자, 비밀문, 서랍 장치 등의 걸쇠를 해제하여 자동으로 개방되는 기믹을 제작할 수 있습니다.</li>
+          <li><b>서보 모터 / 소형 모터 제어</b>: 조화를 천천히 피어나게 하거나, 특정 타이밍에 동전을 떨어뜨리는 등 모터를 이용한 기계식 기믹을 조작할 수 있습니다.</li>
+          <li><b>릴(Reel) 작동 및 실 당기기</b>: 모터를 짧게 회전시켜 실을 당김으로써 물건이 저절로 날아오거나 움직이는 연출이 가능합니다.</li>
+        </ol>
+        <div class='tb'>💡 <b>출력 세기 제어 (PWM)</b>: 0%에서 100% 사이의 전압을 제어하므로 서보 모터의 회전 속도를 늦추거나 솔레노이드 래치의 열리는 순간적인 힘을 상황에 맞게 튜닝할 수 있습니다.</div>
+        <div class='wb'>⚠ 코일이 들어간 솔레노이드 등은 과열 위험이 있으므로, 실행 시간(PLAY)을 0.5초 ~ 1.5초 등 동작에 필요한 최소 수준으로 짧게 유지하는 것이 좋습니다.</div>
+      </div>
+    </details>
+    </div>
+    )rawliteral";
+
+    auto state = std::make_shared<ManualStreamState>();
+    state->header = getPageHeader("사용 설명서", "pg_manual");
+    state->body = MANUAL_BODY;
+    state->bodyLen = strlen(MANUAL_BODY);
+    state->footer = getPageFooter(true);
+    state->section = 0;
+    state->offset = 0;
+
+    AsyncWebServerResponse *response = request->beginChunkedResponse("text/html; charset=UTF-8", [state](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+        if (state->section == 0) {
+            size_t len = state->header.length();
+            size_t available = len - state->offset;
+            size_t toWrite = (available > maxLen) ? maxLen : available;
+            if (toWrite > 0) {
+                memcpy(buffer, state->header.c_str() + state->offset, toWrite);
+                state->offset += toWrite;
+                return toWrite;
+            }
+            state->section = 1;
+            state->offset = 0;
+        }
+        if (state->section == 1) {
+            size_t available = state->bodyLen - state->offset;
+            size_t toWrite = (available > maxLen) ? maxLen : available;
+            if (toWrite > 0) {
+                memcpy(buffer, state->body + state->offset, toWrite);
+                state->offset += toWrite;
+                return toWrite;
+            }
+            state->section = 2;
+            state->offset = 0;
+        }
+        if (state->section == 2) {
+            size_t len = state->footer.length();
+            size_t available = len - state->offset;
+            size_t toWrite = (available > maxLen) ? maxLen : available;
+            if (toWrite > 0) {
+                memcpy(buffer, state->footer.c_str() + state->offset, toWrite);
+                state->offset += toWrite;
+                return toWrite;
+            }
+            state->section = 3;
+        }
+        return 0;
+    });
+
+    response->addHeader("Connection", "close");
+    request->send(response);
 }
 
 void WebManager::handleExit(AsyncWebServerRequest* request) {
-    String html = getPageHeader("Exiting Wi-Fi Mode");
-    html += "<p>The device will now return to normal operation. You can close this window.</p>";
+    String html = getPageHeader("Wi-Fi 모드 종료", "pg_exit");
+    html += F("<p data-i18n='exit_msg'>기기가 정상 동작 모드로 돌아갑니다. 이 창을 닫아도 됩니다.</p>");
     if (_otaUpdateDownloaded.load()) {
-        html += "<p style='color:blue;font-weight:bold;'>An update was downloaded and will be applied on reboot.</p>";
+        html += F("<p style='color:#60a5fa;font-weight:bold;' data-i18n='exit_ota_msg'>업데이트가 다운로드됐습니다. 재시작 후 자동 적용됩니다.</p>");
     }
     html += getPageFooter(false);
-    request->send(200, "text/html; charset=UTF-8", html);
-    delay(100);
+    sendResponse(request, 200, "text/html; charset=UTF-8", html);
+    vTaskDelay(pdMS_TO_TICKS(300));
     if (_modeManager) _modeManager->exitWifiMode();
 }
 
 void WebManager::handleNotFound(AsyncWebServerRequest* request) { 
-    request->send(404, "text/plain", "Not Found"); 
+    sendResponse(request, 404, "text/plain", "Not Found"); 
 }
 
 void WebManager::handleScanWifiApi(AsyncWebServerRequest* request) {
-    if (_isScanningWifi.load()) {
-        request->send(429, "application/json", "{\"status\":\"busy\", \"message\":\"Scan already in progress.\"}");
+    if (_isScanningWifi.exchange(true)) {
+        sendResponse(request, 429, "application/json", "{\"status\":\"busy\", \"message\":\"Scan already in progress.\"}");
         return;
     }
-    _isScanningWifi = true;
-    xTaskCreate(wifiScanTask, "wifiScanTask", 4096, this, 5, NULL);
-    request->send(202, "application/json", "{\"status\":\"accepted\", \"message\":\"Scan started.\"}");
+    BaseType_t res = xTaskCreate(wifiScanTask, "wifiScanTask", 4096, this, 5, NULL);
+    if (res != pdPASS) {
+        _isScanningWifi = false;
+        sendResponse(request, 500, "application/json", "{\"error\":\"Memory allocation failed\"}");
+        return;
+    }
+    sendResponse(request, 202, "application/json", "{\"status\":\"accepted\", \"message\":\"Scan started.\"}");
 }
 
 void WebManager::handleConnectWifiApi(AsyncWebServerRequest* request) {
     if (_isConnectingWifi.load()) {
-        request->send(429, "application/json", "{\"error\":\"Connection already in progress\"}");
+        sendResponse(request, 429, "application/json", "{\"error\":\"Connection already in progress\"}");
         return;
     }
     if (!request->hasParam("ssid", true)) {
-        request->send(400, "application/json", "{\"error\":\"Missing SSID\"}");
+        sendResponse(request, 400, "application/json", "{\"error\":\"Missing SSID\"}");
         return;
     }
 
@@ -717,18 +1006,26 @@ void WebManager::handleConnectWifiApi(AsyncWebServerRequest* request) {
 
     Log::Info(PSTR("WEB: Received connect request for SSID: %s"), ssid.c_str());
 
-    _isConnectingWifi = true;
+    if (_isConnectingWifi.exchange(true)) {
+        sendResponse(request, 429, "application/json", "{\"error\":\"Connection already in progress\"}");
+        return;
+    }
     _wifiConnectStartMillis = millis();
 
-    Utils::saveWifiCredential(ssid, password);
-    
+    // 연결 성공 후에만 저장 (GOT_IP에서 플래그 세팅 → loop()에서 실제 저장)
+    strncpy(_pendingCredSSID, ssid.c_str(), sizeof(_pendingCredSSID) - 1);
+    _pendingCredSSID[sizeof(_pendingCredSSID) - 1] = '\0';
+    strncpy(_pendingCredPwd, password.c_str(), sizeof(_pendingCredPwd) - 1);
+    _pendingCredPwd[sizeof(_pendingCredPwd) - 1] = '\0';
+    _pendingSaveCredential = false;
+
     broadcastWifiStatus("connecting");
-    
+
     WiFi.disconnect(true, true);
-    delay(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
     WiFi.begin(ssid.c_str(), password.c_str());
-    
-    request->send(202, "application/json", "{\"status\":\"connection_attempt_started\"}");
+
+    sendResponse(request, 202, "application/json", "{\"status\":\"connection_attempt_started\"}");
 }
 
 void WebManager::handleWifiStatusApi(AsyncWebServerRequest* request) {
@@ -737,22 +1034,38 @@ void WebManager::handleWifiStatusApi(AsyncWebServerRequest* request) {
     if(request) {
         String output; 
         serializeJson(doc, output);
-        request->send(200, "application/json", output);
+        sendResponse(request, 200, "application/json", output);
     }
 }
 
 void WebManager::handleCheckOtaApi(AsyncWebServerRequest* request) {
     if (_isCheckingOta.exchange(true)) {
-        request->send(200, "application/json", "{\"status\":\"already_checking\"}");
+        sendResponse(request, 200, "application/json", "{\"status\":\"already_checking\"}");
         return;
     }
-    xTaskCreate(otaCheckVersionTask, "otaCheckTask", 8192, this, 5, NULL);
-    request->send(200, "application/json", "{\"status\":\"checking\"}");
+    // Reduced stack from 8KB to 6KB to save RAM
+    BaseType_t res = xTaskCreate(otaCheckVersionTask, "otaCheckTask", 6144, this, 5, NULL);
+    if (res != pdPASS) {
+        _isCheckingOta = false;
+        sendResponse(request, 500, "application/json", "{\"error\":\"Memory allocation failed\"}");
+        return;
+    }
+    sendResponse(request, 200, "application/json", "{\"status\":\"checking\"}");
 }
 
 void WebManager::handleDownloadOtaApi(AsyncWebServerRequest* request) {
-    xTaskCreate(otaDownloadTask, "otaDownloadTask", 10240, this, 2, NULL); // Create task to download OTA firmware
-    request->send(200, "application/json", "{\"status\":\"download_started\"}");
+    if (_isDownloadingOta.exchange(true)) {
+        sendResponse(request, 429, "application/json", "{\"status\":\"ota_download_in_progress\"}");
+        return;
+    }
+    // Reduced stack from 10KB to 8KB to save RAM
+    BaseType_t res = xTaskCreate(otaDownloadTask, "otaDownloadTask", 8192, this, 2, NULL);
+    if (res != pdPASS) {
+        _isDownloadingOta = false;
+        sendResponse(request, 500, "application/json", "{\"error\":\"Memory allocation failed\"}");
+        return;
+    }
+    sendResponse(request, 200, "application/json", "{\"status\":\"download_started\"}");
 }
 
 void WebManager::handleDeviceStatusApi(AsyncWebServerRequest* request) {
@@ -761,14 +1074,21 @@ void WebManager::handleDeviceStatusApi(AsyncWebServerRequest* request) {
     doc["test_delay_ms"] = Utils::loadTestDelay();
     doc["test_play_ms"] = Utils::loadTestPlay();
     String output; serializeJson(doc, output);
-    request->send(200, "application/json", output);
+    sendResponse(request, 200, "application/json", output);
 }
 
 void WebManager::handleSetDeviceIdApi(AsyncWebServerRequest* request) {
-    if (request->hasParam("id", true)) {
-        _modeManager->updateDeviceId(request->getParam("id", true)->value().toInt(), true); // Update device ID via ModeManager
+    if (!_modeManager || !request->hasParam("id", true)) {
+        sendResponse(request, 400, "application/json", "{\"error\":\"bad request\"}");
+        return;
     }
-    request->send(200); // Send success response
+    int idVal = request->getParam("id", true)->value().toInt();
+    if (idVal < MIN_DEVICE_ID || idVal > MAX_DEVICE_ID) {
+        sendResponse(request, 400, "application/json", "{\"error\":\"Device ID out of range\"}");
+        return;
+    }
+    _modeManager->updateDeviceId((uint8_t)idVal, true);
+    sendResponse(request, 200, "application/json", "{\"status\":\"ok\"}");
 }
 
 void WebManager::handleRunTestApi(AsyncWebServerRequest* request) {
@@ -783,10 +1103,14 @@ void WebManager::handleRunTestApi(AsyncWebServerRequest* request) {
         playMs = request->getParam("play", true)->value().toInt();
     }
 
+    // 최댓값 클램핑: delay 255분, play 255초
+    delayMs = min(delayMs, (uint32_t)15300000UL); // 255 * 60 * 1000
+    playMs  = min(playMs,  (uint32_t)255000UL);   // 255 * 1000
+
     if (_modeManager) {
-        _modeManager->triggerManualRun(delayMs, playMs); // Trigger manual test run in ModeManager
+        _modeManager->triggerManualRun(delayMs, playMs);
     }
-    request->send(200, "application/json", "{\"status\":\"started\"}");
+    sendResponse(request, 200, "application/json", "{\"status\":\"started\"}");
 }
 
 void WebManager::handleDisconnectWifiApi(AsyncWebServerRequest* request) {
@@ -803,7 +1127,7 @@ void WebManager::handleDisconnectWifiApi(AsyncWebServerRequest* request) {
     }
 
     WiFi.disconnect(); // 연결만 끊고 저장된 자격증명은 유지
-    request->send(200, "application/json", "{\"status\":\"disconnected\"}");
+    sendResponse(request, 200, "application/json", "{\"status\":\"disconnected\"}");
 }
 
 // --- Event Handlers & Helpers ---
@@ -848,6 +1172,7 @@ void WebManager::onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
             if (_instance) {
                 if (_instance->_isConnectingWifi.load()) {
                     _instance->_isConnectingWifi = false;
+                    _instance->_pendingSaveCredential = true; // loop()에서 Core 1이 실제 저장
                 }
                 _instance->_lastDisconnectReason = 0;
                 _instance->broadcastWifiStatus("connected");
@@ -968,12 +1293,13 @@ void WebManager::broadcastOtaStatus() {
 
     doc["type"] = "ota_status";
     
+    bool checkOk = isConnected && !_latestOtaVersion.isEmpty();
     doc["internet_ok"] = isConnected;
+    doc["check_ok"] = checkOk;
     doc["current_version"] = _currentFirmwareVersion;
-    doc["latest_version"] = isConnected ? _latestOtaVersion : "N/A";
+    doc["latest_version"] = isConnected ? _latestOtaVersion : "";
     doc["update_available"] = isConnected ? _otaUpdateAvailable : false;
-    
-    doc["changelog"] = isConnected ? _otaChangeLog : "Connect to Wi-Fi to check for updates.";
+    doc["changelog"] = checkOk ? _otaChangeLog : "";
 
     broadcastJson(doc);
 }
@@ -1001,8 +1327,9 @@ void WebManager::otaCheckVersionTask(void* pvParameters) {
 
 void WebManager::otaDownloadTask(void* pvParameters) {
     WebManager* self = static_cast<WebManager*>(pvParameters);
-    self->downloadAndApplyOta(); // Download and apply OTA
-    vTaskDelete(NULL); // Delete the task
+    self->downloadAndApplyOta();
+    self->_isDownloadingOta = false;
+    vTaskDelete(NULL);
 }
 
 bool WebManager::fetchOtaVersionInfo() {
@@ -1051,7 +1378,7 @@ void WebManager::downloadAndApplyOta() {
 
     if (WiFi.status() != WL_CONNECTED) {
         doc["success"] = false;
-        doc["msg"] = "OTA Failed: No Internet Connection.";
+        doc["msg"] = "업데이트 실패: 인터넷 연결 없음.";
     } else {
         xSemaphoreTake(_otaDataMutex, portMAX_DELAY);
         String firmwareUrl = _otaFirmwareUrl;
@@ -1059,10 +1386,9 @@ void WebManager::downloadAndApplyOta() {
 
         if (firmwareUrl.isEmpty()) {
             doc["success"] = false;
-            doc["msg"] = "OTA Failed: No firmware URL. Check version first.";
+            doc["msg"] = "업데이트 실패: 펌웨어 URL 없음. 먼저 버전 확인을 하세요.";
             broadcastJson(doc);
             esp_task_wdt_delete(NULL);
-            vTaskDelete(NULL);
             return;
         }
 
@@ -1071,6 +1397,7 @@ void WebManager::downloadAndApplyOta() {
         client.setInsecure();
 
         http.begin(client, firmwareUrl);
+        http.setTimeout(30000);  // 다운로드 HTTP 타임아웃 30초
         int httpCode = http.GET();
 
         if (httpCode == HTTP_CODE_OK) {
@@ -1082,12 +1409,16 @@ void WebManager::downloadAndApplyOta() {
                 size_t written = 0;
                 int lastProgress = -1;
                 uint8_t buff[1024] = { 0 };
+                bool writeFailed = false;
 
                 while (http.connected() && (contentLength <= 0 || written < (size_t)contentLength)) {
                     esp_task_wdt_reset();
                     size_t len = stream->readBytes(buff, sizeof(buff));
                     if (len > 0) {
-                        Update.write(buff, len);
+                        if (Update.write(buff, len) != len) {
+                            writeFailed = true;
+                            break;
+                        }
                         written += len;
                         if (contentLength > 0) {
                             int progress = (int)(((float)written / (float)contentLength) * 100);
@@ -1100,31 +1431,34 @@ void WebManager::downloadAndApplyOta() {
                     vTaskDelay(pdMS_TO_TICKS(1));
                 }
 
-                if ((contentLength <= 0 || written == (size_t)contentLength) && Update.end(true)) {
+                if (writeFailed) {
+                    doc["success"] = false;
+                    doc["msg"] = "쓰기 오류: " + String(Update.errorString());
+                    Update.abort();
+                } else if ((contentLength <= 0 || written == (size_t)contentLength) && Update.end(true)) {
                     _otaUpdateDownloaded = true;
                     if (_modeManager) _modeManager->setUpdateDownloaded(true);
                     doc["success"] = true;
-                    doc["msg"] = "Download complete! Update will be applied on exit.";
+                    doc["msg"] = "다운로드 완료! Wi-Fi 모드 종료 시 업데이트가 적용됩니다.";
                     Log::Info("OTA: Download successful.");
                 } else {
                     doc["success"] = false;
-                    doc["msg"] = "Update failed: " + String(Update.errorString());
+                    doc["msg"] = "업데이트 실패: " + String(Update.errorString());
                     Update.abort();
                 }
             } else {
                 doc["success"] = false;
-                doc["msg"] = "Not enough space or invalid content length. Error: " + String(Update.getError());
+                doc["msg"] = "저장 공간 부족 또는 잘못된 데이터. 오류: " + String(Update.getError());
             }
         } else {
             doc["success"] = false;
-            doc["msg"] = "Failed to download. HTTP Error: " + String(httpCode);
+            doc["msg"] = "다운로드 실패. HTTP 오류: " + String(httpCode);
         }
         http.end();
     }
     
     broadcastJson(doc);
     esp_task_wdt_delete(NULL);
-    vTaskDelete(NULL);
 }
 
 void WebManager::setupLogBroadcaster() {
@@ -1140,8 +1474,8 @@ void WebManager::setupLogBroadcaster() {
     });
 }
 
-String WebManager::getPageHeader(const String& title) {
-    String html = F("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>");
+String WebManager::getPageHeader(const String& title, const char* i18nKey) {
+    String html = F("<!DOCTYPE html><html lang='ko'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>");
     html += "<title>" + title + "</title>";
     html += F(R"rawliteral(<style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -1169,7 +1503,18 @@ String WebManager::getPageHeader(const String& title) {
             -webkit-backdrop-filter: blur(20px);
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
             text-align: center;
+            position: relative;
         }
+
+        .lang-switcher{position:relative;display:flex;justify-content:flex-end;margin-bottom:8px;z-index:1000;}
+        .lang-cur{display:flex;align-items:center;gap:5px;background:rgba(167,139,250,0.18);border:1.5px solid rgba(167,139,250,0.5);color:#ddd6fe;border-radius:10px;padding:7px 13px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background 0.2s,border-color 0.2s;white-space:nowrap;letter-spacing:0.02em;}
+        .lang-cur:hover{background:rgba(167,139,250,0.3);border-color:rgba(167,139,250,0.7);}
+        .lang-drop{display:none;position:absolute;top:calc(100% + 8px);right:0;background:#18163a;border:1.5px solid rgba(167,139,250,0.4);border-radius:12px;padding:6px;min-width:130px;box-shadow:0 10px 32px rgba(0,0,0,0.7);z-index:100;}
+        .lang-drop-label{font-size:10px;color:rgba(167,139,250,0.6);text-transform:uppercase;letter-spacing:0.08em;padding:4px 12px 6px;font-weight:600;}
+        .lang-switcher.open .lang-drop{display:block;}
+        .lang-opt{display:block;width:100%;text-align:left;background:none;border:none;color:#c4b5fd;padding:8px 14px;font-size:13px;font-weight:500;cursor:pointer;border-radius:8px;font-family:inherit;box-sizing:border-box;}
+        .lang-opt:hover{background:rgba(167,139,250,0.2);}
+        .lang-opt.active{color:#e9d5ff;font-weight:700;background:rgba(167,139,250,0.12);}
         
         h1 {
             font-size: 26px;
@@ -1382,30 +1727,20 @@ String WebManager::getPageHeader(const String& title) {
             font-weight: 500;
         }
     </style>
-    <script>
-        function showMessage(text, type = 'info', duration = 3000) {
-            let msgBox = document.getElementById('global-message-box');
-            if (!msgBox) {
-                msgBox = document.createElement('div');
-                msgBox.id = 'global-message-box';
-                document.body.appendChild(msgBox);
-            }
-            msgBox.textContent = text;
-            msgBox.className = 'message-box message-' + type + ' show';
-            if (duration > 0) {
-                setTimeout(() => {
-                    msgBox.classList.remove('show');
-                }, duration);
-            }
-        }
-    </script>
-    </head><body><div class='container'><h1>)rawliteral");
-    html += title; html += F("</h1>"); return html;
+    <script src='/i18n.js'></script>
+    </head><body><div class='container'>)rawliteral");
+    html += F("<div class='lang-switcher' id='lang-sw'><button class='lang-cur' id='lang-cur-btn' onclick='toggleLangMenu(event)'>🌐 한 &#9662;</button><div class='lang-drop'><div class='lang-drop-label'>Language</div><button class='lang-opt' data-lang='0' onclick='setLang(0)'>EN — English</button><button class='lang-opt' data-lang='1' onclick='setLang(1)'>한국어</button><button class='lang-opt' data-lang='2' onclick='setLang(2)'>中文</button><button class='lang-opt' data-lang='3' onclick='setLang(3)'>日本語</button><button class='lang-opt' data-lang='4' onclick='setLang(4)'>DE — Deutsch</button><button class='lang-opt' data-lang='5' onclick='setLang(5)'>ES — Español</button><button class='lang-opt' data-lang='6' onclick='setLang(6)'>FR — Français</button></div></div>");
+    html += F("<h1");
+    if (i18nKey) { html += F(" data-i18n='"); html += i18nKey; html += F("'"); }
+    html += F(">");
+    html += title;
+    html += F("</h1>");
+    return html;
 }
 
 String WebManager::getPageFooter(bool showHomeButton) {
-    String html; 
-    if (showHomeButton) html += F("<p style='margin-top:25px;'><a href='/' class='btn'>Back to Home</a></p>");
-    html += F("</div></body></html>"); 
+    String html;
+    if (showHomeButton) html += F("<p style='margin-top:25px;'><a href='/' class='btn' data-i18n='back_home'>홈으로 돌아가기</a></p>");
+    html += F("</div></body></html>");
     return html;
 }

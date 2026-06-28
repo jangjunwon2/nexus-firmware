@@ -16,6 +16,7 @@ namespace Utils {
     static const char* KEY_LAST_SEQ_CNT  = "last_seq_cnt";
     
     static const char* KEY_MASTER_MAC = "master_mac"; // [NEW] MAC 키
+    static const char* KEY_COMM_CHANNEL = "comm_channel"; // [NEW] RF 채널 키
 
     static Preferences preferences;
 
@@ -43,7 +44,9 @@ namespace Utils {
     void saveWifiCredential(const String& ssid, const String& password) {
         String currentCreds = loadWifiCredentials();
         JsonDocument doc;
-        deserializeJson(doc, currentCreds);
+        if (deserializeJson(doc, currentCreds) != DeserializationError::Ok || !doc.is<JsonArray>()) {
+            doc.to<JsonArray>();
+        }
         JsonArray array = doc.as<JsonArray>();
 
         bool updated = false;
@@ -68,7 +71,9 @@ namespace Utils {
     void removeWifiCredential(const String& ssid) {
         String currentCreds = loadWifiCredentials();
         JsonDocument doc;
-        deserializeJson(doc, currentCreds);
+        if (deserializeJson(doc, currentCreds) != DeserializationError::Ok || !doc.is<JsonArray>()) {
+            doc.to<JsonArray>();
+        }
         JsonArray array = doc.as<JsonArray>();
         for (JsonArray::iterator it = array.begin(); it != array.end(); ++it) {
             if ((*it)["ssid"] == ssid) { array.remove(it); break; }
@@ -84,7 +89,7 @@ namespace Utils {
         Log::Info(PSTR("NVS: Cleared all Wi-Fi credentials"));
     }
 
-    String loadDeviceId() { return preferences.getString(KEY_DEVICE_ID, "0"); }
+    String loadDeviceId() { return preferences.getString(KEY_DEVICE_ID, "1"); }
 
     void saveDeviceId(const String& id) {
         preferences.putString(KEY_DEVICE_ID, id);
@@ -147,12 +152,21 @@ namespace Utils {
         }
         return false;
     }
+
+    void saveCommChannel(uint8_t channel) {
+        preferences.putUChar(KEY_COMM_CHANNEL, channel);
+        Log::Info(PSTR("NVS: Saved Comm Channel: %d"), channel);
+    }
+
+    uint8_t loadCommChannel() {
+        return preferences.getUChar(KEY_COMM_CHANNEL, 1); // 기본값 1
+    }
 }
 
 void Log::begin() { _logMutex = xSemaphoreCreateMutex(); }
 void Log::setWebSocketLogSender(const WsLogSender& sender) { _wsLogSender = sender; }
 void Log::printLog(const char* level, const char* format, va_list args) {
-    if (xSemaphoreTake(_logMutex, portMAX_DELAY) == pdTRUE) {
+    if (xSemaphoreTake(_logMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         char buffer[256];
         vsnprintf(buffer, sizeof(buffer), format, args);
         if (Serial) Serial.printf("[%lu ms][%s] %s\n", millis(), level, buffer);

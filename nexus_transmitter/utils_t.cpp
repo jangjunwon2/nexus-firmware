@@ -12,9 +12,11 @@ std::vector<NetworkCred> knownNetworks;
 // 1) Logging Functions
 //────────────────────────────────────────────────────────────────────────────
 void initLog() {
+#if DEBUG_MODE
     Serial.begin(115200);
     delay(100);
     Serial.println("\n\nLogging initialized");
+#endif
 }
 
 #if DEBUG_MODE
@@ -46,7 +48,7 @@ void logPrintf(LogLevel level, const char* format, ...) {
 // 2) Timer Calculation Functions
 //────────────────────────────────────────────────────────────────────────────
 uint32_t getTimerMs(uint8_t deviceID, bool isDelay, uint8_t stepIndex) {
-    if (deviceID > MAX_DEVICES || stepIndex >= MAX_EXECUTION_STEPS) {
+    if (deviceID < 1 || deviceID > MAX_DEVICES || stepIndex >= MAX_EXECUTION_STEPS) {
         return 0;
     }
     
@@ -64,9 +66,13 @@ uint32_t getTimerMs(uint8_t deviceID, bool isDelay, uint8_t stepIndex) {
 // 3) EEPROM Initialization and ID/Group ID Management
 //────────────────────────────────────────────────────────────────────────────
 void initEEPROM() {
-    EEPROM.begin(EEPROM_SIZE);
-    delay(100);
-    logPrintf(LogLevel::LOG_INFO, "EEPROM initialized");
+    static bool done = false;
+    if (!done) {
+        EEPROM.begin(EEPROM_SIZE);
+        delay(100);
+        done = true;
+        logPrintf(LogLevel::LOG_INFO, "EEPROM initialized");
+    }
 }
 
 uint8_t loadID() {
@@ -110,7 +116,11 @@ void loadSettings() {
         }
     }
     EEPROM.commit();
-    logPrintf(LogLevel::LOG_INFO, "Settings loaded from EEPROM");
+
+    // 진동 ON/OFF 설정 로드 (0x00 = OFF, 그 외 = ON / 미기록 시 0xFF → ON)
+    uint8_t vibByte = EEPROM.read(EEPROM_VIB_ENABLED_ADDR);
+    vibrationEnabled = (vibByte != 0x00);
+    logPrintf(LogLevel::LOG_INFO, "Settings loaded from EEPROM (vib=%d)", vibrationEnabled ? 1 : 0);
 }
 
 void saveSettings(bool saveGroupOnly) {
@@ -170,6 +180,17 @@ void saveKnownNetwork(const String& ssid, const String& pass) {
     commitKnownNetworks();
 }
 
+void removeKnownNetwork(const String& ssid) {
+    for (auto it = knownNetworks.begin(); it != knownNetworks.end(); ++it) {
+        if (it->ssid == ssid) {
+            knownNetworks.erase(it);
+            commitKnownNetworks();
+            logPrintf(LogLevel::LOG_INFO, "OTA: Removed known network: %s", ssid.c_str());
+            break;
+        }
+    }
+}
+
 void commitKnownNetworks() {
     uint8_t clear_buf[EEPROM_WIFI_SSID_SIZE + EEPROM_WIFI_PASS_SIZE] = {0};
     for(int i = 0; i < MAX_KNOWN_NETWORKS; ++i) {
@@ -177,7 +198,7 @@ void commitKnownNetworks() {
         EEPROM.writeBytes(base, clear_buf, sizeof(clear_buf));
     }
     
-    for(int i = 0; i < knownNetworks.size(); i++) {
+    for(size_t i = 0; i < knownNetworks.size(); i++) {
         int base = WIFI_SSID_ADDR + i * (EEPROM_WIFI_SSID_SIZE + EEPROM_WIFI_PASS_SIZE);
         EEPROM.writeString(base, knownNetworks[i].ssid);
         EEPROM.writeString(base + EEPROM_WIFI_SSID_SIZE, knownNetworks[i].pass);
@@ -219,8 +240,15 @@ const char* getModeString(int mode) {
         case MODE_OTA_CONFIRM: return "OTA_CONFIRM";
         case MODE_OTA_DOWNLOADING: return "OTA_DOWNLOADING";
         case MODE_OTA_ERROR: return "OTA_ERROR";
-        case MODE_CLONE_TX: return "SYNC (MAIN)"; // 추가
-        case MODE_CLONE_RX: return "SYNC (SPARE)"; // 추가
+        case MODE_CLONE_TX: return "PAIRING";
+        case MODE_CLONE_RX: return "SPARE COPY";
+        case MODE_RF_SCAN: return "AUTO_CH";
+        case MODE_CANCEL_MESSAGE: return "CANCEL_MSG";
+        case MODE_LANGUAGE_SETTING: return "LANGUAGE_SET";
+        case MODE_GROUP_MEMBERS: return "GROUP_MEMBERS";
+        case MODE_OTA_CHECKING: return "OTA_CHECKING";
+        case MODE_OTA_UPDATING: return "OTA_UPDATING";
+        case MODE_OTA_SUCCESS: return "OTA_SUCCESS";
         default: return "UNKNOWN_MODE";
     }
 }

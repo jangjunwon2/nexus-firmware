@@ -6,14 +6,14 @@
 #include <IPAddress.h>
 #include "espnow_comm_shared.h"
 
-constexpr const char* FIRMWARE_VERSION = "1.0";
+constexpr const char* FIRMWARE_VERSION = "1.1";
 constexpr bool DEBUG_MODE = true;
 constexpr uint32_t WDT_TIMEOUT_S = 30;
 
 constexpr uint8_t ID_BUTTON_PIN = 4;
 constexpr uint8_t EXEC_BUTTON_PIN = 2;
-constexpr uint8_t MOSFET_PIN_1 = 7;
-constexpr uint8_t MOSFET_PIN_2 = 8;
+constexpr uint8_t MOSFET_PIN_1 = 8;
+constexpr uint8_t MOSFET_PIN_2 = 9;
 constexpr uint8_t LED_PIN = 48;
 
 constexpr unsigned long DEBOUNCE_DELAY_MS = 50;
@@ -33,7 +33,7 @@ constexpr uint8_t MIN_DEVICE_ID = 1;
 constexpr uint8_t MAX_DEVICE_ID = 20;
 constexpr uint8_t MIN_EXECUTION_STEPS = 1;
 
-constexpr uint8_t ESP_NOW_CHANNEL = 1;
+extern uint8_t ESP_NOW_CHANNEL;
 static const uint8_t BROADCAST_ADDRESS[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 constexpr const char* AP_SSID = "Nexus_Smoke";
@@ -48,6 +48,10 @@ constexpr unsigned long OTA_HTTP_TIMEOUT_MS = 10000;
 constexpr uint32_t DEFAULT_TEST_DELAY_MS = 0;
 constexpr uint32_t DEFAULT_TEST_PLAY_MS = 1000;
 
+// 안전 제한: 단일 동작 15초, 멀티스텝 개별 스텝 10초
+constexpr uint32_t SMOKE_SINGLE_MAX_MS = 15000;
+constexpr uint32_t SMOKE_STEP_MAX_MS   = 10000;
+
 enum MachineType : uint8_t {
     TYPE_ALL = 0, TYPE_POT, TYPE_SMOKE, TYPE_FOUNTAIN, TYPE_REEL, TYPE_MAGNET
 };
@@ -60,6 +64,7 @@ constexpr MachineType MY_MACHINE_TYPE = TYPE_SMOKE;
 enum class DeviceMode {
     MODE_BOOT, MODE_NORMAL, MODE_ID_BLINK, MODE_ID_SET, MODE_WIFI, MODE_TEST, MODE_EXIT_WIFI, 
     MODE_PAIRING, // 무선 페어링 모드
+    MODE_RF_SCAN,
     MODE_ERROR
 };
 

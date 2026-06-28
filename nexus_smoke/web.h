@@ -39,7 +39,9 @@ private:
     std::atomic<bool> _otaUpdateDownloaded;
     std::atomic<bool> _isScanningWifi;
     std::atomic<bool> _isConnectingWifi;
-    
+    std::atomic<bool> _isCheckingOta;
+    std::atomic<bool> _isDownloadingOta;
+
     String _currentFirmwareVersion;
     String _latestOtaVersion;
     String _otaChangeLog;
@@ -55,12 +57,17 @@ private:
     String _disconnectedForTestSsid;
     bool _reconnectOnExitTest;
 
+    volatile bool _pendingSaveCredential;
+    char _pendingCredSSID[65];
+    char _pendingCredPwd[65];
+
     void setupRoutes();
     void setupLogBroadcaster();
     void setupWebSocket();
     void reconnectWifiIfNeeded();
 
     void handleRoot(AsyncWebServerRequest* request);
+    void handleManualPage(AsyncWebServerRequest* request);
     void handleWifiConfigPage(AsyncWebServerRequest* request);
     void handleFirmwareUpdatePage(AsyncWebServerRequest* request);
     void handleTestModePage(AsyncWebServerRequest* request);
@@ -94,7 +101,7 @@ private:
     void broadcastOtaProgress(int progress);
     void broadcastJson(const JsonDocument& doc);
     
-    String getPageHeader(const String& title);
+    String getPageHeader(const String& title, const char* i18nKey = nullptr);
     String getPageFooter(bool showHomeButton);
 
     void loop();

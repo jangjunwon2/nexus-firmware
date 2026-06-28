@@ -81,6 +81,10 @@ namespace Utils {
     void saveMasterMac(const uint8_t* mac);
     bool loadMasterMac(uint8_t* mac);
 
+    // [NEW] RF 스캔된 최적 통신 채널 저장/불러오기
+    void saveCommChannel(uint8_t channel);
+    uint8_t loadCommChannel();
+
     uint32_t loadTimedRunMs();
     void saveTimedRunMs(uint32_t ms);
 }

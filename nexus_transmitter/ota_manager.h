@@ -17,9 +17,9 @@ void handleOtaLoop();      // 메인 루프에서 처리할 OTA 로직
 void shutdownWifi();       // Wi-Fi 종료
 void setupWebServer();     // 웹 서버 설정 (업로드 핸들러 포함)
 
-// [NEW] OTA 모드 확인 함수
+// OTA 모드 확인 — MODE_OTA_WIFI_AP~MODE_OTA_ERROR 연속 범위 전체 포함
 inline bool isOtaMode(Mode mode) {
-    return (mode == MODE_OTA_WIFI_AP || mode == MODE_OTA_UPDATING || mode == MODE_OTA_SUCCESS || mode == MODE_OTA_ERROR);
+    return (mode >= MODE_OTA_WIFI_AP && mode <= MODE_OTA_ERROR);
 }
 
 #endif // OTA_MANAGER_H

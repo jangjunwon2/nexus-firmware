@@ -31,6 +31,7 @@ void displayUpdatePage();
 void displayExecutionMode();
 void displayTimerMonitor();          
 void displayCompletionMessage();
+void displayCancelMessage();
 void displayCenteredModeName(const char* modeName);
 void displayBatteryIcon();
 void drawBlinkingText(int x, int y, const char* format, ...);
@@ -48,6 +49,15 @@ void displayOtaError();
 // [NEW] 복제 모드 UI
 void displayCloneTxMode();
 void displayCloneRxMode();
+
+// [NEW] RF 자동 환경 분석 스캔 UI
+void displayRfScanMode();
+
+// [NEW] 언어 선택 화면
+void displayLanguageMenu();
+
+// [NEW] 그룹 멤버 편집 화면
+void displayGroupMembers();
 
 const char* getMachineTypeStr(MachineType type);
 

@@ -13,8 +13,19 @@
 void setup() {
     initLog();
     
-    // [NEW] Wi-Fi 및 하드웨어 초기화 전에 MAC 주소 복제 검사
-    EEPROM.begin(EEPROM_SIZE);
+    // MAC 복제·채널·언어 설정은 initHardware()/initEspNow() 전에 읽어야 하므로 여기서 먼저 초기화.
+    // initHardware() 내부의 중복 호출은 제거됨.
+    initEEPROM();
+    
+    // [AUTO CH] 저장된 최적 채널 로드 (AUTO CH 스캔으로 결정·저장됨, 기본/검증실패 시 Ch 1).
+    // 페어링·AUTO CH 핸드셰이크는 항상 Ch 1을 랑데부로 사용하므로, 채널이 어긋나도
+    // AUTO CH 한 번이면 재동기화됨(자가 복구).
+    uint8_t savedChan = EEPROM.read(EEPROM_WIFI_CHANNEL_ADDR);
+    WIFI_CHANNEL = (savedChan == 1 || savedChan == 6 || savedChan == 11) ? savedChan : 1;
+
+    // [다국어] 저장된 OLED 표시 언어 로드 (미기록 시 영어)
+    loadLanguage();
+
     if (EEPROM.read(EEPROM_CLONED_MAC_FLAG) == 0xAA) {
         uint8_t clonedMac[6];
         for (int i = 0; i < 6; i++) {
@@ -27,7 +38,7 @@ void setup() {
         logPrintf(LogLevel::LOG_INFO, "SYSTEM: Original MAC Mode");
     }
 
-    Serial.println("\n\n[INFO] SYSTEM: Transmitter Device Booting...");
+    logPrintf(LogLevel::LOG_INFO, "SYSTEM: Transmitter Device Booting...");
     logPrintf(LogLevel::LOG_INFO, "Firmware v%s | %s", firmwareVersion.c_str(), firmwareNotes.c_str());
     
     if (!initHardware()) {
@@ -60,9 +71,9 @@ void loop() {
         display.clearDisplay();
         display.setTextSize(1);
         display.setTextColor(SSD1306_WHITE);
-        displayCenteredModeName("SYNC (SPARE)");
+        displayCenteredModeName("SPARE COPY");
         display.setCursor(TEXT_X, OLED_MENU_START_Y + 9);
-        display.println("SYNC SUCCESS!");
+        display.println("COPY SUCCESS!");
         display.setCursor(TEXT_X, OLED_MENU_START_Y + 18);
         display.println("Rebooting...");
         display.display();
@@ -71,7 +82,14 @@ void loop() {
         ESP.restart();
     }
 
-    updateButtons();
+    // [다국어] 웹 UI 등에서 변경된 언어 설정을 안전하게 EEPROM에 커밋
+    if (pendingEepromCommit) {
+        pendingEepromCommit = false;
+        EEPROM.commit();
+        logPrintf(LogLevel::LOG_INFO, "EEPROM: Committed language changes safely from loop.");
+    }
+
+    updateButtons();   // 버튼 상태 읽기 (handleButtons 내부 중복 호출 제거됨)
     handleButtons();
     updateVibrationMotor();
     updateDisplay();
@@ -79,7 +97,6 @@ void loop() {
     
     if (!isOtaMode(currentMode)) {
         checkExecutionAndMode();
-        manageCommunication();
     }
     
     delay(10); // 과도한 CPU 점유 방지용 짧은 딜레이

@@ -61,7 +61,7 @@ ButtonEventType HardwareManager::getButtonEvent() {
 }
 
 unsigned long HardwareManager::getExecButtonPressedDuration() const {
-    return _execButtonPressedDuration;
+    return _execButtonPressedDuration.load();
 }
 
 void HardwareManager::processButtonInput() {
@@ -120,19 +120,19 @@ void HardwareManager::processButtonInput() {
         _execButtonPressTimestamp = currentTime;
         _currentButtonEvent = ButtonEventType::EXEC_BUTTON_PRESS;
     } else if (!_execButtonState && _execButtonPressTimestamp > 0) {
-        _execButtonPressedDuration = currentTime - _execButtonPressTimestamp;
+        _execButtonPressedDuration.store(currentTime - _execButtonPressTimestamp);
         _currentButtonEvent = ButtonEventType::EXEC_BUTTON_RELEASE;
         _execButtonPressTimestamp = 0;
     }
 }
 
 void HardwareManager::setLedPattern(LedPatternType pattern, int repeatCount) {
-    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
+    if (_currentLedPattern.load() == pattern && _ledTargetBlinkCount.load() == repeatCount && pattern != LedPatternType::LED_ID_SET_INCREMENT) {
         return;
     }
-    _currentLedPattern = pattern;
-    _ledTargetBlinkCount = repeatCount;
-    _ledPatternStartTime = millis();
+    _ledTargetBlinkCount.store(repeatCount);
+    _ledPatternStartTime.store(millis());
+    _currentLedPattern.store(pattern);
 }
 
 void HardwareManager::updateLed() {
@@ -141,7 +141,7 @@ void HardwareManager::updateLed() {
     if (pattern == LedPatternType::LED_OFF) { if (_ledState) setLed(false); return; }
     if (pattern == LedPatternType::LED_ON) { if (!_ledState) setLed(true); return; }
 
-    unsigned long elapsedTime = millis() - _ledPatternStartTime;
+    unsigned long elapsedTime = millis() - _ledPatternStartTime.load();
 
     switch (pattern) {
         case LedPatternType::LED_BOOT_SUCCESS:
@@ -163,7 +163,7 @@ void HardwareManager::updateLed() {
             break;
         case LedPatternType::LED_ID_DISPLAY: {
             unsigned long blinkDuration = 2 * LED_ID_BLINK_INTERVAL_MS;
-            unsigned long totalDuration = (unsigned long)_ledTargetBlinkCount * blinkDuration;
+            unsigned long totalDuration = (unsigned long)_ledTargetBlinkCount.load() * blinkDuration;
 
             if (elapsedTime >= totalDuration) {
                 setLed(false);
@@ -216,14 +216,25 @@ void HardwareManager::setMosfets(uint8_t pwmValue) {
         if (pwmValue > 0) {
             digitalWrite(BOOST_EN_PIN, HIGH);
             vTaskDelay(pdMS_TO_TICKS(10));
+
+            // [소프트 스타트] 듀티를 0→목표로 ~30ms에 걸쳐 단계적으로 올려 인러시 전류 스파이크를 완화.
+            // 즉시 100%로 켜면 부스트/부하 돌입전류가 3.3V 레일을 끌어내려 브라운아웃 리셋을 유발했음.
+            // 수십 ms 램프는 효과상 체감되지 않으면서 피크 전류를 크게 낮춤.
+            const int kRampSteps = 6;
+            for (int s = 1; s < kRampSteps; s++) {
+                int stepDuty = (dutyCycle * s) / kRampSteps;
+                ledcWrite(MOSFET_PIN_1, stepDuty);
+                ledcWrite(MOSFET_PIN_2, stepDuty);
+                vTaskDelay(pdMS_TO_TICKS(5));
+            }
         } else {
             digitalWrite(BOOST_EN_PIN, LOW);
         }
 
         ledcWrite(MOSFET_PIN_1, dutyCycle);
         ledcWrite(MOSFET_PIN_2, dutyCycle);
-        
-        Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d) / Boost EN: %s"), pwmValue, dutyCycle, pwmValue > 0 ? "ON" : "OFF"); 
+
+        Log::Info(PSTR("HW: MOSFETs set to %d%% (Duty: %d) / Boost EN: %s"), pwmValue, dutyCycle, pwmValue > 0 ? "ON" : "OFF");
     } 
 }
 

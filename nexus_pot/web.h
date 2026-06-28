@@ -23,6 +23,7 @@ public:
 
     void performUpdateAndReboot();
     void broadcastTestComplete();
+    void broadcastTestStart(uint32_t delayMs, uint32_t playMs);
 
     static WebManager* _instance;
 
@@ -40,6 +41,7 @@ private:
     std::atomic<bool> _isScanningWifi;
     std::atomic<bool> _isConnectingWifi;
     std::atomic<bool> _isCheckingOta;
+    std::atomic<bool> _isDownloadingOta;
 
     String _currentFirmwareVersion;
     String _latestOtaVersion;
@@ -56,12 +58,18 @@ private:
     String _disconnectedForTestSsid;
     bool _reconnectOnExitTest;
 
+    // WiFi 연결 성공 후에만 자격증명 저장 (연결 전 EEPROM 오버라이트 방지)
+    volatile bool _pendingSaveCredential;
+    char _pendingCredSSID[65];
+    char _pendingCredPwd[65];
+
     void setupRoutes();
     void setupLogBroadcaster();
     void setupWebSocket();
     void reconnectWifiIfNeeded();
 
     void handleRoot(AsyncWebServerRequest* request);
+    void handleManualPage(AsyncWebServerRequest* request);
     void handleWifiConfigPage(AsyncWebServerRequest* request);
     void handleFirmwareUpdatePage(AsyncWebServerRequest* request);
     void handleTestModePage(AsyncWebServerRequest* request);
@@ -95,7 +103,7 @@ private:
     void broadcastOtaProgress(int progress);
     void broadcastJson(const JsonDocument& doc);
 
-    String getPageHeader(const String& title);
+    String getPageHeader(const String& title, const char* i18nKey = nullptr);
     String getPageFooter(bool showHomeButton);
 
     void loop();

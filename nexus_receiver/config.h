@@ -6,7 +6,7 @@
 #include <IPAddress.h>
 #include "espnow_comm_shared.h"
 
-constexpr const char* FIRMWARE_VERSION = "1.0";
+constexpr const char* FIRMWARE_VERSION = "1.1";
 constexpr bool DEBUG_MODE = true;
 constexpr uint32_t WDT_TIMEOUT_S = 30;
 
@@ -35,7 +35,7 @@ constexpr uint8_t MIN_DEVICE_ID = 1;
 constexpr uint8_t MAX_DEVICE_ID = 20;
 constexpr uint8_t MIN_EXECUTION_STEPS = 1;
 
-constexpr uint8_t ESP_NOW_CHANNEL = 1;
+extern uint8_t ESP_NOW_CHANNEL;
 static const uint8_t BROADCAST_ADDRESS[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 constexpr const char* AP_SSID = "Nexus_Receiver";
@@ -54,13 +54,14 @@ enum MachineType : uint8_t {
 };
 
 // 장치 타입 설정
-constexpr MachineType MY_MACHINE_TYPE = TYPE_SMOKE;
+constexpr MachineType MY_MACHINE_TYPE = TYPE_FOUNTAIN;
 
 
 
 enum class DeviceMode {
     MODE_BOOT, MODE_NORMAL, MODE_ID_BLINK, MODE_ID_SET, MODE_WIFI, MODE_TEST, MODE_EXIT_WIFI, 
     MODE_PAIRING, 
+    MODE_RF_SCAN,
     MODE_ERROR
 };
 

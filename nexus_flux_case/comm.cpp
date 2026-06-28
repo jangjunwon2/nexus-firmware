@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <esp_wifi.h>
 
+uint8_t ESP_NOW_CHANNEL = 1;
 CommManager* CommManager::_instance = nullptr;
 
 void onDataRecv(const esp_now_recv_info_t* info, const uint8_t* incomingData, int len) {
@@ -33,7 +34,13 @@ bool CommManager::begin(uint8_t deviceId, ModeManager* modeMgr) {
     _myDeviceId = deviceId;
     _modeManager = modeMgr;
 
-    Log::Info(PSTR("COMM: Initializing ESP-NOW (Receiver, ID: %d)"), _myDeviceId);
+    // [AUTO CH] 저장된 최적 채널 로드 (AUTO CH 스캔 결과, 기본/검증실패 시 Ch 1).
+    // 페어링·AUTO CH 핸드셰이크는 항상 Ch 1 랑데부 → 채널 어긋나도 AUTO CH로 자가복구.
+    uint8_t savedCh = Utils::loadCommChannel();
+    ESP_NOW_CHANNEL = (savedCh == 1 || savedCh == 6 || savedCh == 11) ? savedCh : 1;
+    _currentHopChannel = ESP_NOW_CHANNEL;
+
+    Log::Info(PSTR("COMM: Initializing ESP-NOW (Receiver, ID: %d, Channel: %d)"), _myDeviceId, ESP_NOW_CHANNEL);
 
     _hasMasterMac = Utils::loadMasterMac(_masterMac);
     if (_hasMasterMac) {
@@ -44,13 +51,16 @@ bool CommManager::begin(uint8_t deviceId, ModeManager* modeMgr) {
     }
 
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, false);
+    // 절전 비활성화는 initEspNow()에서 처리 (모든 init 경로 공통)
 
     if (!initEspNow()) {
         return false;
     }
 
     _lastPacketRecvTime = millis(); // 시작 시점 유실 타이머 구동
-    xTaskCreatePinnedToCore(channelHoppingTask, "HoppingTask", 3072, this, 2, NULL, 0);
+    xTaskCreatePinnedToCore(channelHoppingTask, "HoppingTask", 4096, this, 2, NULL, 0);
 
     Log::Info(PSTR("COMM: ESP-NOW initialized successfully (Channel: %d)."), ESP_NOW_CHANNEL);
     return true;
@@ -64,16 +74,14 @@ void CommManager::registerMasterMac(const uint8_t* mac) {
     memcpy(_masterMac, mac, 6);
     _hasMasterMac = true;
     Utils::saveMasterMac(mac);
-    Log::Info(PSTR("COMM: Master Transmitter Paired Successfully!"));
+    // [복구] 페어링 = 알려진 기본 채널(Ch1)로 복귀. 송신기도 페어링 시 Ch1로 리셋하므로
+    // 페어링만 하면 두 기기가 항상 같은 채널(Ch1)에 모임 → 채널 불일치 상태에서 탈출.
+    ESP_NOW_CHANNEL = 1;
+    Utils::saveCommChannel(1);
+    Log::Info(PSTR("COMM: Master Transmitter Paired Successfully! (Channel reset to 1)"));
     if (_modeManager) {
         _modeManager->notifyPairingSuccess();
     }
-}
-
-void CommManager::prepareForWifiMode() {
-    esp_now_deinit();
-    _currentHopChannel = ESP_NOW_CHANNEL;
-    Log::Info(PSTR("COMM: ESP-NOW deinitialized for WiFi AP mode."));
 }
 
 void CommManager::reinitForEspNow() {
@@ -84,11 +92,24 @@ void CommManager::reinitForEspNow() {
     }
     esp_now_deinit();
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, false);
     if (!initEspNow()) {
         Log::Error(PSTR("COMM: Failed to reinitialize ESP-NOW."));
     } else {
         Log::Info(PSTR("COMM: ESP-NOW reinitialized successfully."));
     }
+}
+
+// WiFi(AP/STA·OTA) 모드 진입 전 ESP-NOW를 정리하고 WiFi 드라이버를 리셋한다.
+// esp_now_deinit() 직후 WiFi.scanNetworks()를 호출하면 내부 상태가 오염되어
+// 이후 softAP()가 항상 실패한다. WIFI_OFF 리셋을 스캔 이전에 수행해야
+// 이 오염이 방지된다. MODE_EXIT_WIFI에서 reinitForEspNow()로 대칭 복원.
+void CommManager::prepareForWifiMode() {
+    Log::Info(PSTR("COMM: Preparing for WiFi mode (ESP-NOW deinit + WiFi reset)..."));
+    esp_now_deinit();
+    WiFi.mode(WIFI_OFF);
+    vTaskDelay(pdMS_TO_TICKS(300));
 }
 
 bool CommManager::initEspNow() {
@@ -97,7 +118,13 @@ bool CommManager::initEspNow() {
         if (_modeManager) _modeManager->switchToMode(DeviceMode::MODE_ERROR, true);
         return false;
     }
-    
+
+    // [CRITICAL] 절전 비활성화는 esp_now_init(=WiFi 완전 시작) 이후에 호출해야 확실히 적용됨.
+    // 너무 일찍 호출하면 부팅 직후 적용 실패 → 간헐적 수신 불능.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    // [발열/전류] 근거리엔 최대출력 과함 → 13dBm. 전류 스파이크/발열 감소, 신호는 충분히 강함.
+    esp_wifi_set_max_tx_power(52); // 52 = 13dBm
+
     registerCallbacks();
     
     esp_now_peer_info_t peerInfo = {};
@@ -125,15 +152,85 @@ void CommManager::updateMyDeviceId(uint8_t newId) {
 void CommManager::handleEspNowRecv(const esp_now_recv_info_t* recv_info, const uint8_t* incomingData, int len) {
     uint32_t rxTime = micros(); 
     
-    if (_isPairingMode && len == sizeof(Comm::ClonePacket)) {
-        const Comm::ClonePacket* clonePkt = reinterpret_cast<const Comm::ClonePacket*>(incomingData);
-        if (memcmp(clonePkt->signature, Comm::kSig, 4) == 0 && clonePkt->packetType == Comm::CLONE_MAC_ANNOUNCE) {
-            uint8_t calculated_crc = Comm::crc8(incomingData, sizeof(Comm::ClonePacket) - 1);
-            if (calculated_crc == clonePkt->crc8) {
-                registerMasterMac(recv_info->src_addr);
+    // [DEBUG] 수신 패킷 로깅. 단, 대량 유입되는 것들은 콜백 차단(→ ACK 지연/드롭) 방지를 위해 생략:
+    // FIRE(0x02)·프루브(0x05) 항상 생략, 클론(0x03)은 페어링 중이 아닐 때만 생략(송신기 자동반복 스팸).
+    if (len >= 6) {
+        uint8_t pType = incomingData[5];
+        bool suppress = (pType == Comm::SCAN_PROBE_PACKET) || (pType == Comm::FIRE_COMMAND) ||
+                        (pType == Comm::CLONE_MAC_ANNOUNCE && !_isPairingMode);
+        if (!suppress) {
+            Log::Info(PSTR("COMM: Recv len: %d, type: 0x%02X, pairingMode: %d"), len, pType, _isPairingMode);
+        }
+    }
+    
+    if (_isPairingMode) {
+        if (len == sizeof(Comm::ClonePacket)) {
+            const Comm::ClonePacket* clonePkt = reinterpret_cast<const Comm::ClonePacket*>(incomingData);
+            if (clonePkt->packetType == Comm::CLONE_MAC_ANNOUNCE) {
+                if (memcmp(clonePkt->signature, Comm::kSig, 4) == 0) {
+                    uint8_t calculated_crc = Comm::crc8(incomingData, sizeof(Comm::ClonePacket) - 1);
+                    if (calculated_crc == clonePkt->crc8) {
+                        Log::Info(PSTR("COMM: Valid ClonePacket received. Registering Master MAC..."));
+                        registerMasterMac(recv_info->src_addr);
+                    } else {
+                        Log::Warn(PSTR("COMM: ClonePacket CRC mismatch (calc: 0x%02X, recv: 0x%02X)"), calculated_crc, clonePkt->crc8);
+                    }
+                } else {
+                    Log::Warn(PSTR("COMM: ClonePacket signature invalid"));
+                }
+            } else {
+                Log::Warn(PSTR("COMM: ClonePacket type invalid (0x%02X)"), clonePkt->packetType);
             }
+        } else {
+            Log::Debug(PSTR("COMM: Recv len %d does not match ClonePacket size (%d) during pairing"), len, sizeof(Comm::ClonePacket));
         }
         return; 
+    }
+
+    // [NEW] 채널 확정(COMMIT) 패킷 수신 감지 (AUTO CH 안전 핸드셰이크)
+    const Comm::ChannelCommitPacket* commitPkt = nullptr;
+    if (Comm::verifyChannelCommitPacket(incomingData, len, commitPkt)) {
+        Log::Info(PSTR("COMM: Channel commit received -> Ch %d"), commitPkt->channel);
+        if (_modeManager) _modeManager->handleChannelCommit(commitPkt->channel);
+        return;
+    }
+
+    // [NEW] RF 스캔 개시 패킷 수신 감지
+    const Comm::ScanStartPacket* startPkt = nullptr;
+    if (Comm::verifyScanStartPacket(incomingData, len, startPkt)) {
+        Log::Info(PSTR("COMM: Scan start packet detected."));
+        if (_modeManager) _modeManager->handleScanStartCommand();
+        return;
+    }
+
+    // [NEW] RF 스캔 프루브 패킷 수신 감지
+    const Comm::ScanProbePacket* probePkt = nullptr;
+    if (Comm::verifyScanProbePacket(incomingData, len, probePkt)) {
+        if (_modeManager) _modeManager->handleScanProbePacket(probePkt->channel, probePkt->probeIndex);
+        return;
+    }
+
+    // [NEW] 취소 패킷 수신 감지 (송신기 B 버튼 길게 누름 → 즉시 시퀀스 중단)
+    const Comm::CancelPacket* cancelPkt = nullptr;
+    if (Comm::verifyCancelPacket(incomingData, len, cancelPkt)) {
+        Log::Info(PSTR("COMM: CANCEL received — targetId=%d, myId=%d"), cancelPkt->targetId, _myDeviceId);
+        if (cancelPkt->targetId == 0 || cancelPkt->targetId == _myDeviceId) {
+            if (_modeManager) _modeManager->cancelPlaySequence();
+        }
+        return;
+    }
+
+    // [NEW] 홀드 패킷 수신 감지 (송신기 PLAY 버튼 누르는 동안 지속 출력)
+    const Comm::HoldPacket* holdPkt = nullptr;
+    if (Comm::verifyHoldPacket(incomingData, len, holdPkt)) {
+        Log::Info(PSTR("COMM: HOLD verify OK -> targetId=%d myId=%d active=%d pwm=%d"),
+                  holdPkt->targetId, _myDeviceId, holdPkt->holdActive, holdPkt->pwmValue);
+        if (holdPkt->targetId == _myDeviceId || holdPkt->targetId == 0) {
+            if (_modeManager) _modeManager->handleHold(holdPkt->pwmValue, holdPkt->holdActive);
+        } else {
+            Log::Warn(PSTR("COMM: HOLD ignored — targetId=%d != myId=%d"), holdPkt->targetId, _myDeviceId);
+        }
+        return;
     }
 
     const Comm::CommPacket* pkt = nullptr;
@@ -152,8 +249,15 @@ void CommManager::handleEspNowRecv(const esp_now_recv_info_t* recv_info, const u
         }
     }
 
-    Log::Info(PSTR("COMM: Valid packet received. Passing to ModeManager."));
-    
+    // [DEBUG] FIRE 수신 신호세기 (300ms마다 1회) — TX→RX 링크 품질 진단.
+    // RSSI가 -75dBm보다 낮거나 크게 출렁이면 거리/안테나/전원 불안정 의심.
+    static unsigned long lastRssiLog = 0;
+    if (millis() - lastRssiLog > 300) {
+        lastRssiLog = millis();
+        int rssi = (recv_info && recv_info->rx_ctrl) ? recv_info->rx_ctrl->rssi : 0;
+        Log::Info(PSTR("COMM: FIRE RX RSSI: %d dBm"), rssi);
+    }
+
     if (_modeManager) {
         _modeManager->handleEspNowCommand(recv_info->src_addr, *pkt, rxTime);
     }
@@ -165,52 +269,57 @@ void CommManager::sendAck(const uint8_t* targetMac, const Comm::CommPacket& orig
     Comm::AckPacket ackPacket;
     uint32_t rxProcessingTime = micros() - rx_time;
     Comm::fillAckPacket(ackPacket, _myDeviceId, originalPacket.txMicros, rxProcessingTime);
-    
-    if (!esp_now_is_peer_exist(targetMac)) {
-        esp_now_peer_info_t peer = {};
-        memcpy(peer.peer_addr, targetMac, 6);
-        peer.channel = 0; // 동적 채널 전송 허용
-        peer.encrypt = false;
-        if (esp_now_add_peer(&peer) != ESP_OK && esp_now_add_peer(&peer) != ESP_ERR_ESPNOW_EXIST) return;
+
+    // ACK는 BROADCAST로 전송 (유니캐스트 링크레이어 ACK 의존성 제거).
+    // 무선 링크가 유실이 잦으므로 3회 송출로 도달률 향상. 수신기측 txMicros 중복제거(_lastAckedTxMicros)로
+    // FIRE 사본마다가 아니라 '고유 발사당' 3회만 나가므로 과거의 ACK 폭주는 발생하지 않음.
+    for (int i = 0; i < 3; i++) {
+        esp_now_send(BROADCAST_ADDRESS, (uint8_t*)&ackPacket, sizeof(ackPacket));
     }
-    esp_now_send(targetMac, (uint8_t*)&ackPacket, sizeof(ackPacket));
 }
 
-uint8_t CommManager::getChannel() const { 
-    return ESP_NOW_CHANNEL; 
+// [NEW] 지연 ACK 송출 — 송신기 FIRE 버스트가 끝난 뒤(반이중 충돌 회피) 메인루프에서 호출됨.
+void CommManager::sendAckBroadcast(uint32_t originalTxMicros) {
+    Comm::AckPacket ackPacket;
+    Comm::fillAckPacket(ackPacket, _myDeviceId, originalTxMicros, 0);
+    for (int i = 0; i < 3; i++) {
+        esp_now_send(BROADCAST_ADDRESS, (uint8_t*)&ackPacket, sizeof(ackPacket));
+    }
+}
+
+uint8_t CommManager::getChannel() const {
+    return ESP_NOW_CHANNEL;
 }
 
 void CommManager::channelHoppingTask(void* param) {
     CommManager* self = static_cast<CommManager*>(param);
-    uint8_t hopIdx = 0;
+    bool wasInSpecialMode = false;
     
     for (;;) {
-        // ModeManager가 있고 NORMAL 또는 PAIRING 모드일 때만 채널 호핑 스캔을 돌림
-        // (WIFI/TEST 모드 시 SoftAP 채널 유지를 위해 정지)
-        if (self->_modeManager && 
-           (self->_modeManager->getCurrentMode() == DeviceMode::MODE_NORMAL || 
-            self->_modeManager->getCurrentMode() == DeviceMode::MODE_PAIRING)) {
-            
-            unsigned long currentTime = millis();
-            if (currentTime - self->_lastPacketRecvTime > Comm::CHANNEL_HOVER_TIMEOUT_MS) {
-                // 신호 유실: 다음 채널로 전환하며 스캔
-                hopIdx = (hopIdx + 1) % Comm::NUM_HOPPING_CHANNELS;
-                uint8_t targetChannel = Comm::HOPPING_CHANNELS[hopIdx];
-                
-                if (self->_currentHopChannel != targetChannel) {
-                    self->_currentHopChannel = targetChannel;
-                    esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
-                    Log::Debug(PSTR("COMM: Channel lost. Hopping to Ch %d"), targetChannel);
-                }
-                vTaskDelay(pdMS_TO_TICKS(Comm::CHANNEL_SWITCH_INTERVAL_MS));
+        uint8_t targetChannel = ESP_NOW_CHANNEL;
+        if (self->_modeManager) {
+            DeviceMode m = self->_modeManager->getCurrentMode();
+            if (m == DeviceMode::MODE_PAIRING || m == DeviceMode::MODE_RF_SCAN || m == DeviceMode::MODE_WIFI || m == DeviceMode::MODE_EXIT_WIFI) {
+                // 페어링, 스캔, Wi-Fi 모드일 때는 호핑 태스크가 채널을 건드리지 않고
+                // 시스템 및 웹/OTA 기능이 지정한 채널을 그대로 유지하게 함
+                wasInSpecialMode = true;
+                vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
             }
-        } else {
-            // WIFI/TEST 모드 등에서는 채널을 건드리지 않음
-            // softAP가 동작 중일 때 esp_wifi_set_channel()을 호출하면 AP 비콘이 중단됨
-            // 채널 복구는 exitWifi 시 reinitForEspNow()가 처리함
-            self->_currentHopChannel = ESP_NOW_CHANNEL;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        
+        // 특수 모드를 방금 이탈한 경우 캐시 강제 무효화하여 물리 채널 즉시 갱신 유도
+        if (wasInSpecialMode) {
+            self->_currentHopChannel = 0;
+            wasInSpecialMode = false;
+        }
+        
+        // NORMAL 또는 다른 모드일 때는 기본 채널로 설정 고정
+        if (self->_currentHopChannel != targetChannel) {
+            self->_currentHopChannel = targetChannel;
+            esp_wifi_set_channel(targetChannel, WIFI_SECOND_CHAN_NONE);
+            Log::Debug(PSTR("COMM: Normal mode. Channel fixed to Ch %d"), targetChannel);
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

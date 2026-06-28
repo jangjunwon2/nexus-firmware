@@ -55,6 +55,7 @@ extern std::vector<NetworkCred> knownNetworks;
 
 void loadKnownNetworks();
 void saveKnownNetwork(const String& ssid, const String& pass);
+void removeKnownNetwork(const String& ssid);
 void commitKnownNetworks();
 void clearKnownNetworks();
 

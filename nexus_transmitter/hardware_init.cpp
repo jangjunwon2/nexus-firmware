@@ -6,6 +6,7 @@
 #include "driver/rtc_io.h"
 #include "hardware_core.h"
 #include "esp_sleep.h"
+#include "ui_text_t.h"   // U8g2 다국어 텍스트 레이어
 
 Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, -1);
 Button buttonUp(BUTTON_UP_PIN), buttonDown(BUTTON_DOWN_PIN), buttonBack(BUTTON_BACK_PIN), buttonEnter(BUTTON_ENTER_PIN);
@@ -24,6 +25,7 @@ bool initDisplay() {
         return false;
     }
     display.clearDisplay();
+    uiTextBegin();   // [다국어] U8g2 텍스트 레이어 초기화 (display.begin 이후)
     oledInitialized = true;
     return true;
 }
@@ -41,6 +43,8 @@ void initBatteryMonitor() {
 bool initHardware() {
     logPrintf(LogLevel::LOG_INFO, "Booting normally.");
 
+    rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
+
     bool displayOK = initDisplay();
 
     buttonUp.begin();
@@ -49,7 +53,7 @@ bool initHardware() {
     buttonEnter.begin();
 
     initVibrationMotor();
-    initEEPROM();
+    // initEEPROM()은 setup()에서 이미 호출됨 (MAC 복제·채널·언어 로드가 선행 필요)
     loadSettings();
     initBatteryMonitor();
 
