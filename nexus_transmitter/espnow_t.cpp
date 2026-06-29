@@ -8,6 +8,22 @@ uint8_t WIFI_CHANNEL = 1;
 volatile bool cloneReceivedFlag = false;
 volatile uint8_t clonedMacBuffer[6] = {};
 
+// [NEW] SPARE COPY 수신 추적 상태
+volatile uint8_t  cloneRxChannelBuffer = 1;
+volatile bool     cloneRxMacReceived = false;
+volatile uint8_t  cloneRxSettingsCount = 0;
+DeviceSettings    cloneRxSettingsBuffer[MAX_DEVICES + 1] = {};
+static uint32_t   cloneRxSettingsReceivedMask = 0; // 비트 i → deviceIndex i 수신 여부 (비트1~20 사용)
+
+void resetCloneRxState() {
+    cloneRxChannelBuffer = 1;
+    cloneRxMacReceived = false;
+    cloneRxSettingsCount = 0;
+    cloneRxSettingsReceivedMask = 0;
+    memset(cloneRxSettingsBuffer, 0, sizeof(cloneRxSettingsBuffer));
+    cloneReceivedFlag = false;
+}
+
 // [NEW] RF 자동 환경 분석 관련 전역 변수 정의
 volatile bool rfScanComplete = false;
 static portMUX_TYPE scanMux = portMUX_INITIALIZER_UNLOCKED; // scan result 그룹 쓰기/읽기 spinlock
@@ -47,21 +63,40 @@ void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
         return; // 스캔 중에는 리포트만 처리
     }
 
-    // 복제 수신 대기 모드일 때 가로채기
-    if (currentMode == MODE_CLONE_RX && len == sizeof(Comm::ClonePacket)) {
-        const Comm::ClonePacket* clonePkt = (const Comm::ClonePacket*)data;
-        if (memcmp(clonePkt->signature, Comm::kSig, 4) == 0 && clonePkt->packetType == Comm::CLONE_MAC_ANNOUNCE) {
-            uint8_t calc_crc = Comm::crc8(data, sizeof(Comm::ClonePacket) - 1);
-            if (calc_crc == clonePkt->crc8) {
-                for (int i = 0; i < 6; i++) clonedMacBuffer[i] = clonePkt->macAddress[i];
-                cloneReceivedFlag = true;
-                logPrintf(LogLevel::LOG_INFO, "CLONE RX: Valid Mac Announce from: %02X:%02X:%02X:%02X:%02X:%02X",
-                          clonedMacBuffer[0], clonedMacBuffer[1], clonedMacBuffer[2], clonedMacBuffer[3], clonedMacBuffer[4], clonedMacBuffer[5]);
-            } else {
-                logPrintf(LogLevel::LOG_WARN, "CLONE RX: CRC mismatch (calc: 0x%02X, recv: 0x%02X).", calc_crc, clonePkt->crc8);
+    // 복제 수신 대기 모드: ClonePacket(MAC+채널) 및 SettingsChunkPacket 처리
+    if (currentMode == MODE_CLONE_RX) {
+        if (len == sizeof(Comm::ClonePacket)) {
+            const Comm::ClonePacket* clonePkt = reinterpret_cast<const Comm::ClonePacket*>(data);
+            if (memcmp(clonePkt->signature, Comm::kSig, 4) == 0 &&
+                clonePkt->packetType == Comm::CLONE_MAC_ANNOUNCE &&
+                Comm::crc8(data, sizeof(Comm::ClonePacket) - 1) == clonePkt->crc8) {
+                if (!cloneRxMacReceived) {
+                    for (int i = 0; i < 6; i++) clonedMacBuffer[i] = clonePkt->macAddress[i];
+                    cloneRxChannelBuffer = clonePkt->wifiChannel;
+                    cloneRxMacReceived = true;
+                    logPrintf(LogLevel::LOG_INFO, "CLONE RX: MAC=%02X:%02X:%02X:%02X:%02X:%02X Ch=%d",
+                              clonePkt->macAddress[0], clonePkt->macAddress[1], clonePkt->macAddress[2],
+                              clonePkt->macAddress[3], clonePkt->macAddress[4], clonePkt->macAddress[5],
+                              clonePkt->wifiChannel);
+                }
             }
-        } else {
-            logPrintf(LogLevel::LOG_WARN, "CLONE RX: Invalid packet signature or type.");
+        } else if (len == sizeof(Comm::SettingsChunkPacket)) {
+            const Comm::SettingsChunkPacket* sPkt = nullptr;
+            if (Comm::verifySettingsChunkPacket(data, len, sPkt)) {
+                uint8_t idx = sPkt->deviceIndex;
+                uint32_t bit = (1u << idx);
+                if (!(cloneRxSettingsReceivedMask & bit)) {
+                    cloneRxSettingsBuffer[idx] = sPkt->settings;
+                    cloneRxSettingsReceivedMask |= bit;
+                    cloneRxSettingsCount++;
+                    logPrintf(LogLevel::LOG_INFO, "CLONE RX: Settings[%d] OK (%d/%d)",
+                              idx, cloneRxSettingsCount, MAX_DEVICES);
+                }
+            }
+        }
+        // MAC + 설정 20개 모두 수신 시 저장 트리거
+        if (cloneRxMacReceived && cloneRxSettingsCount >= MAX_DEVICES) {
+            cloneReceivedFlag = true;
         }
         return;
     }
@@ -230,29 +265,48 @@ void reinitEspNow() {
     }
 }
 
-// 무선 복제 (MAC) 신호 송출 - 모든 채널 버스트 전송
+// 무선 복제 신호 송출 — MAC+채널(ClonePacket) + 장치 설정 20개(SettingsChunkPacket) 브로드캐스트
 void sendCloneAnnounce() {
+    // ClonePacket: MAC + 현재 채널
     Comm::ClonePacket pkt;
     memcpy(pkt.signature, Comm::kSig, 4);
     pkt.version = Comm::kVersion;
     pkt.packetType = Comm::CLONE_MAC_ANNOUNCE;
     esp_read_mac(pkt.macAddress, ESP_MAC_WIFI_STA);
+    pkt.wifiChannel = WIFI_CHANNEL;
     pkt.crc8 = Comm::crc8((const uint8_t*)&pkt, sizeof(Comm::ClonePacket) - 1);
 
-    logPrintf(LogLevel::LOG_INFO, "CLONE TX: Starting clone announce burst on channels {1, 6, 11}");
+    // SettingsChunkPacket 20개 미리 빌드
+    Comm::SettingsChunkPacket chunks[MAX_DEVICES];
+    for (uint8_t i = 0; i < MAX_DEVICES; i++) {
+        uint8_t id = i + 1;
+        Comm::SettingsChunkPacket& c = chunks[i];
+        memcpy(c.signature, Comm::kSig, 4);
+        c.version      = Comm::kVersion;
+        c.packetType   = Comm::SETTINGS_CHUNK_PACKET;
+        c.deviceIndex  = id;
+        c.totalDevices = MAX_DEVICES;
+        c.settings     = deviceSettings[id];
+        c.crc8         = Comm::crc8((const uint8_t*)&c, sizeof(Comm::SettingsChunkPacket) - 1);
+    }
+
+    logPrintf(LogLevel::LOG_INFO, "CLONE TX: Burst on Ch1/6/11 — MAC(Ch%d) + %d settings", WIFI_CHANNEL, MAX_DEVICES);
     for (uint8_t ch : Comm::HOPPING_CHANNELS) {
         esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
-        logPrintf(LogLevel::LOG_INFO, "CLONE TX: Sending on Ch %d (10 times)", ch);
-        // [NEW] 송신 횟수를 채널당 10번으로 늘려서 수신기의 긴 채널 대기(1000ms)와 안정적으로 매칭되도록 보강
+        // ClonePacket 10회 (수신기 채널 대기 창과 겹치도록)
         for (int i = 0; i < 10; i++) {
             esp_now_send(broadcastAddress, (uint8_t*)&pkt, sizeof(pkt));
             vTaskDelay(pdMS_TO_TICKS(15));
         }
+        // SettingsChunkPacket 장치별 1회씩 (예비 리모컨이 누락된 청크는 다음 사이클에 재수신)
+        for (uint8_t i = 0; i < MAX_DEVICES; i++) {
+            esp_now_send(broadcastAddress, (uint8_t*)&chunks[i], sizeof(Comm::SettingsChunkPacket));
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
     }
     esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
-    logPrintf(LogLevel::LOG_INFO, "CLONE: Announce Sent (All Channels Burst)!");
-    // [FIX] 채널 홉(1→6→11) 후 수신 경로 손상 복원 — RF 스캔과 동일 이유로 필요.
-    // 누락 시 페어링 화면을 나간 뒤 ACK 수신 불능.
+    logPrintf(LogLevel::LOG_INFO, "CLONE TX: Burst complete.");
+    // [FIX] 채널 홉 후 수신 경로 손상 복원 — 누락 시 페어링 화면을 나간 뒤 ACK 수신 불능.
     reinitEspNow();
 }
 

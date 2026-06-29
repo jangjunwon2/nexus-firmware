@@ -45,7 +45,41 @@ extern volatile RfScanStatus rfScanStatus;
 extern volatile bool cloneReceivedFlag;
 extern volatile uint8_t clonedMacBuffer[6];
 
+// [NEW] SPARE COPY 수신 진행 상태 (CLONE_RX 모드에서 메인루프와 콜백이 공유)
+extern volatile uint8_t  cloneRxChannelBuffer;    // 수신된 WiFi 채널
+extern volatile bool     cloneRxMacReceived;       // ClonePacket(MAC+채널) 수신 여부
+extern volatile uint8_t  cloneRxSettingsCount;     // 수신 완료된 설정 청크 개수
+extern DeviceSettings    cloneRxSettingsBuffer[MAX_DEVICES + 1]; // 수신된 장치 설정 버퍼
+
+void resetCloneRxState();
+
 namespace Comm {
+
+// [NEW] SPARE COPY용 장치 설정 청크 패킷 (TX→TX, 장치 1개씩 전달)
+#pragma pack(push, 1)
+struct SettingsChunkPacket {
+    uint8_t        signature[4];
+    uint8_t        version;
+    uint8_t        packetType;    // SETTINGS_CHUNK_PACKET (0x0A)
+    uint8_t        deviceIndex;   // 1~MAX_DEVICES
+    uint8_t        totalDevices;  // MAX_DEVICES (20)
+    DeviceSettings settings;      // 45B
+    uint8_t        crc8;
+}; // 총 54B — ESP-NOW 250B 제한 내
+#pragma pack(pop)
+
+static_assert(sizeof(SettingsChunkPacket) == 4+1+1+1+1+sizeof(DeviceSettings)+1, "SettingsChunkPacket size mismatch");
+
+inline bool verifySettingsChunkPacket(const uint8_t* data, size_t len, const SettingsChunkPacket*& pkt) {
+    if (len < sizeof(SettingsChunkPacket)) return false;
+    pkt = reinterpret_cast<const SettingsChunkPacket*>(data);
+    if (memcmp(pkt->signature, kSig, 4) != 0) return false;
+    if (pkt->version != kVersion) return false;
+    if (pkt->packetType != SETTINGS_CHUNK_PACKET) return false;
+    if (pkt->deviceIndex < 1 || pkt->deviceIndex > 20) return false;
+    return crc8(data, sizeof(SettingsChunkPacket) - 1) == pkt->crc8;
+}
+
 inline void fillPacket(CommPacket &pkt, PacketType type, uint8_t tgtId, uint32_t txButtonPressMicros, const DeviceSettings& settings) {
     memcpy(pkt.signature, kSig, 4);
     pkt.version               = kVersion;

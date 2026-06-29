@@ -24,6 +24,8 @@ void changeMode(Mode newMode) {
         buttonDown.resetPressCount();
         buttonEnter.resetPressCount();
         buttonBack.resetPressCount();
+        // [NEW] SPARE COPY 진입 시 이전 수신 상태 초기화 (재진입 안전)
+        if (newMode == MODE_CLONE_RX) resetCloneRxState();
         updateDisplay();
     }
 }
@@ -183,10 +185,6 @@ void handleHomeMenuButtons() {
                 changeMode(MODE_RF_SCAN);
                 break;
             case 3:
-                // 페어링 = 기본 채널(Ch1) 복귀
-                WIFI_CHANNEL = 1;
-                EEPROM.write(EEPROM_WIFI_CHANNEL_ADDR, 1);
-                EEPROM.commit();
                 modeHistory.push_back(static_cast<Mode>(currentMode));
                 changeMode(MODE_CLONE_TX);
                 break;

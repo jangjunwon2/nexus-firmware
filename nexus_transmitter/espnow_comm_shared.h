@@ -50,7 +50,8 @@ enum PacketType : uint8_t {
     SCAN_REPORT_PACKET = 0x06,
     CHANNEL_COMMIT_COMMAND = 0x07, // [NEW] 송신기→수신기 채널 확정(안전 핸드셰이크)
     HOLD_COMMAND = 0x08,           // [NEW] 홀드(누르는 동안 지속) — 킵얼라이브 방식
-    CANCEL_COMMAND = 0x09          // [NEW] 실행 취소 — 수신기 시퀀스 즉시 중단
+    CANCEL_COMMAND = 0x09,         // [NEW] 실행 취소 — 수신기 시퀀스 즉시 중단
+    SETTINGS_CHUNK_PACKET = 0x0A   // [NEW] 예비 복사용 장치 설정 청크 (TX→TX)
 };
 
 struct CommPacket {
@@ -75,12 +76,13 @@ struct AckPacket {
     uint8_t  crc8;
 };
 
-// 무선 복제용 패킷 구조체
+// 무선 복제용 패킷 구조체 (SPARE COPY: TX→TX MAC+채널 전달)
 struct ClonePacket {
     uint8_t  signature[4];
     uint8_t  version;
     uint8_t  packetType;
-    uint8_t  macAddress[6]; 
+    uint8_t  macAddress[6];
+    uint8_t  wifiChannel;  // [NEW] AUTO CH로 확정된 WiFi 채널 (1/6/11)
     uint8_t  crc8;
 };
 
@@ -151,7 +153,7 @@ struct CancelPacket {
 // 구조체 크기 검증
 static_assert(sizeof(CommPacket) == 58, "CommPacket size mismatch");
 static_assert(sizeof(AckPacket) == 15, "AckPacket size mismatch");
-static_assert(sizeof(ClonePacket) == 13, "ClonePacket size mismatch");
+static_assert(sizeof(ClonePacket) == 14, "ClonePacket size mismatch");
 static_assert(sizeof(ScanStartPacket) == 7, "ScanStartPacket size mismatch");
 static_assert(sizeof(ScanProbePacket) == 9, "ScanProbePacket size mismatch");
 static_assert(sizeof(ScanReportPacket) == 12, "ScanReportPacket size mismatch");

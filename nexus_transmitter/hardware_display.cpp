@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <vector>
 #include "ota_manager.h"
+#include "espnow_t.h"    // cloneRxMacReceived, cloneRxChannelBuffer, cloneRxSettingsCount
 
 int groupDisplayLineStarts[5];
 int groupDisplayTotalLines[5];
@@ -117,7 +118,16 @@ void displayCloneRxMode() {
     const int lh = uiLineHeight();
     uiPrint(TEXT_X, OLED_MENU_START_Y,        t(STR_CLONE_WAITING));
     uiPrint(TEXT_X, OLED_MENU_START_Y + lh,   t(STR_CH_BACK_EXIT));
-    uiPrint(TEXT_X, OLED_MENU_START_Y + 2*lh, t(STR_CLONE_UP_RESET));
+    // [NEW] 동기화 진행 상태 표시 (3번째 줄)
+    char syncBuf[24];
+    if (!cloneRxMacReceived) {
+        snprintf(syncBuf, sizeof(syncBuf), "Settings: -/%d", MAX_DEVICES);
+    } else {
+        snprintf(syncBuf, sizeof(syncBuf), "MAC+Ch%d %d/%d",
+                 (int)cloneRxChannelBuffer, (int)cloneRxSettingsCount, MAX_DEVICES);
+    }
+    uiPrint(TEXT_X, OLED_MENU_START_Y + 2*lh, syncBuf);
+    uiPrint(TEXT_X, OLED_MENU_START_Y + 3*lh, t(STR_CLONE_UP_RESET));
 }
 
 // [AUTO CH] 채널 자동 최적화 모드 UI
