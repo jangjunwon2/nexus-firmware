@@ -11,7 +11,7 @@
 #include "espnow_comm_shared.h"
 
 // --- 펌웨어 버전 ---
-constexpr const char* FIRMWARE_VERSION = "1.1";
+constexpr const char* FIRMWARE_VERSION = "1.0";
 
 // --- 디버깅 ---
 constexpr bool DEBUG_MODE = true;

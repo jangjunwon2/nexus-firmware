@@ -80,7 +80,8 @@ struct ClonePacket {
     uint8_t  signature[4];
     uint8_t  version;
     uint8_t  packetType;
-    uint8_t  macAddress[6]; 
+    uint8_t  macAddress[6];
+    uint8_t  wifiChannel;  // [NEW] AUTO CH로 확정된 WiFi 채널 (예비 복사 시 전달)
     uint8_t  crc8;
 };
 
@@ -151,7 +152,7 @@ struct CancelPacket {
 // 구조체 크기 검증
 static_assert(sizeof(CommPacket) == 58, "CommPacket size mismatch");
 static_assert(sizeof(AckPacket) == 15, "AckPacket size mismatch");
-static_assert(sizeof(ClonePacket) == 13, "ClonePacket size mismatch");
+static_assert(sizeof(ClonePacket) == 14, "ClonePacket size mismatch");
 static_assert(sizeof(ScanStartPacket) == 7, "ScanStartPacket size mismatch");
 static_assert(sizeof(ScanProbePacket) == 9, "ScanProbePacket size mismatch");
 static_assert(sizeof(ScanReportPacket) == 12, "ScanReportPacket size mismatch");
